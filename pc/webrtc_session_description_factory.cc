@@ -23,6 +23,7 @@
 #include "api/jsep.h"
 #include "api/jsep_session_description.h"
 #include "api/rtc_error.h"
+#include "base/record_replay.h"
 #include "pc/sdp_state_provider.h"
 #include "pc/session_description.h"
 #include "rtc_base/checks.h"
@@ -149,6 +150,7 @@ WebRtcSessionDescriptionFactory::WebRtcSessionDescriptionFactory(
       session_id_(session_id),
       certificate_request_state_(CERTIFICATE_NOT_NEEDED),
       on_certificate_ready_(on_certificate_ready) {
+  recordreplay::Assert("WebRtcSessionDescriptionFactory %s", session_id.c_str());
   RTC_DCHECK(signaling_thread_);
 
   if (!dtls_enabled) {
@@ -364,6 +366,8 @@ void WebRtcSessionDescriptionFactory::InternalCreateOffer(
   // is created regardless if it's identical to the previous one or not.
   // The |session_version_| is a uint64_t, the wrap around should not happen.
   RTC_DCHECK(session_version_ + 1 > session_version_);
+  recordreplay::Assert("WebRtcSessionDescriptionFactory::InternalCreateOffer %s",
+                       session_id_.c_str());
   auto offer = std::make_unique<JsepSessionDescription>(
       SdpType::kOffer, std::move(desc), session_id_,
       rtc::ToString(session_version_++));

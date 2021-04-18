@@ -16,6 +16,7 @@
 #include <string>
 
 #include "absl/algorithm/container.h"
+#include "base/record_replay.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/message_digest.h"
 #include "rtc_base/rtc_certificate.h"
@@ -46,6 +47,9 @@ std::unique_ptr<SSLFingerprint> SSLFingerprint::Create(
   if (!ret) {
     return nullptr;
   }
+  // Digests can vary when replaying due to the use of OpenSSL.
+  recordreplay::RecordReplayBytes("SSLFingerprint::Create",
+                                  digest_val, digest_len);
   return std::make_unique<SSLFingerprint>(
       algorithm, ArrayView<const uint8_t>(digest_val, digest_len));
 }
@@ -96,7 +100,10 @@ std::unique_ptr<SSLFingerprint> SSLFingerprint::CreateFromCertificate(
 
 SSLFingerprint::SSLFingerprint(const std::string& algorithm,
                                ArrayView<const uint8_t> digest_view)
-    : algorithm(algorithm), digest(digest_view.data(), digest_view.size()) {}
+    : algorithm(algorithm), digest(digest_view.data(), digest_view.size()) {
+  recordreplay::AssertBytes("SSLFingerprint",
+                            digest_view.data(), digest_view.size());
+}
 
 SSLFingerprint::SSLFingerprint(const std::string& algorithm,
                                const uint8_t* digest_in,
@@ -113,6 +120,7 @@ bool SSLFingerprint::operator==(const SSLFingerprint& other) const {
 std::string SSLFingerprint::GetRfc4572Fingerprint() const {
   std::string fingerprint =
       rtc::hex_encode_with_delimiter(digest.data<char>(), digest.size(), ':');
+  recordreplay::Assert("SSLFingerprint::GetRfc4572Fingerprint %s", fingerprint.c_str());
   absl::c_transform(fingerprint, fingerprint.begin(), ::toupper);
   return fingerprint;
 }

@@ -16,6 +16,7 @@
 #include <limits>
 #include <memory>
 
+#include "base/record_replay.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 
@@ -39,7 +40,12 @@ class SecureRandomGenerator : public RandomGenerator {
   ~SecureRandomGenerator() override {}
   bool Init(const void* seed, size_t len) override { return true; }
   bool Generate(void* buf, size_t len) override {
-    return (RAND_bytes(reinterpret_cast<unsigned char*>(buf), len) > 0);
+    bool rv = (RAND_bytes(reinterpret_cast<unsigned char*>(buf), len) > 0);
+
+    // RAND_bytes can behave differently when replaying.
+    recordreplay::RecordReplayBytes("SecureRandomGenerator", buf, len);
+
+    return rv;
   }
 };
 

@@ -12,6 +12,7 @@
 
 #include <memory>
 
+#include "base/record_replay.h"
 #include "p2p/base/port.h"
 #include "pc/media_session.h"
 #include "pc/webrtc_sdp.h"
@@ -172,9 +173,12 @@ std::unique_ptr<SessionDescriptionInterface> CreateSessionDescription(
   return std::move(jsep_description);
 }
 
-JsepSessionDescription::JsepSessionDescription(SdpType type) : type_(type) {}
+JsepSessionDescription::JsepSessionDescription(SdpType type) : type_(type) {
+  recordreplay::RegisterPointer(this);
+}
 
 JsepSessionDescription::JsepSessionDescription(const std::string& type) {
+  recordreplay::RegisterPointer(this);
   absl::optional<SdpType> maybe_type = SdpTypeFromString(type);
   if (maybe_type) {
     type_ = *maybe_type;
@@ -195,16 +199,22 @@ JsepSessionDescription::JsepSessionDescription(
       session_id_(session_id),
       session_version_(session_version),
       type_(type) {
+  recordreplay::RegisterPointer(this);
+  recordreplay::Assert("JsepSessionDescription %lu", session_id.length());
   RTC_DCHECK(description_);
   candidate_collection_.resize(number_of_mediasections());
 }
 
-JsepSessionDescription::~JsepSessionDescription() {}
+JsepSessionDescription::~JsepSessionDescription() {
+  recordreplay::UnregisterPointer(this);
+}
 
 bool JsepSessionDescription::Initialize(
     std::unique_ptr<cricket::SessionDescription> description,
     const std::string& session_id,
     const std::string& session_version) {
+  recordreplay::Assert("JsepSessionDescription #1 %lu %lu",
+                       recordreplay::PointerId(this), session_id.length());
   if (!description)
     return false;
 
@@ -217,6 +227,8 @@ bool JsepSessionDescription::Initialize(
 
 std::unique_ptr<SessionDescriptionInterface> JsepSessionDescription::Clone()
     const {
+  recordreplay::Assert("JsepSessionDescription #2 %lu",
+                       recordreplay::PointerId((void*)this));
   auto new_description = std::make_unique<JsepSessionDescription>(type_);
   new_description->session_id_ = session_id_;
   new_description->session_version_ = session_version_;
@@ -304,6 +316,8 @@ bool JsepSessionDescription::ToString(std::string* out) const {
     return false;
   }
   *out = SdpSerialize(*this);
+  recordreplay::Assert("JsepSessionDescription::ToString %lu %lu",
+                       recordreplay::PointerId((void*)this), out->length());
   return !out->empty();
 }
 

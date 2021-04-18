@@ -18,6 +18,7 @@
 #include "absl/algorithm/container.h"
 #include "absl/strings/match.h"
 #include "api/candidate.h"
+#include "base/record_replay.h"
 #include "logging/rtc_event_log/ice_logger.h"
 #include "p2p/base/basic_ice_controller.h"
 #include "p2p/base/candidate_pair_interface.h"
@@ -927,9 +928,11 @@ void P2PTransportChannel::OnCandidatesReady(
     PortAllocatorSession* session,
     const std::vector<Candidate>& candidates) {
   RTC_DCHECK_RUN_ON(network_thread_);
+  recordreplay::Assert("P2PTransportChannel::OnCandidatesReady Start %lu", candidates.size());
   for (size_t i = 0; i < candidates.size(); ++i) {
     SignalCandidateGathered(this, candidates[i]);
   }
+  recordreplay::Assert("P2PTransportChannel::OnCandidatesReady Done");
 }
 
 void P2PTransportChannel::OnCandidateError(

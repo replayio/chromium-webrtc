@@ -19,6 +19,7 @@
 
 #include "absl/algorithm/container.h"
 #include "absl/strings/match.h"
+#include "base/record_replay.h"
 #include "p2p/base/connection.h"
 #include "p2p/base/port_allocator.h"
 #include "rtc_base/checks.h"
@@ -284,6 +285,7 @@ void Port::AddAddress(const rtc::SocketAddress& address,
   c.set_network_type(network_->type());
   c.set_url(url);
   c.set_related_address(related_address);
+  recordreplay::Assert("Port::AddAddress %d", c.address().IsAnyIP());
 
   bool pending = MaybeObfuscateAddress(&c, type, is_final);
 
@@ -304,6 +306,9 @@ bool Port::MaybeObfuscateAddress(Candidate* c,
     return false;
   }
 
+  recordreplay::Assert("Port::MaybeObfuscateAddress #1 %d",
+                       c->address().IsAnyIP());
+
   auto copy = *c;
   auto weak_ptr = weak_factory_.GetWeakPtr();
   auto callback = [weak_ptr, copy, is_final](const rtc::IPAddress& addr,
@@ -320,6 +325,8 @@ bool Port::MaybeObfuscateAddress(Candidate* c,
     if (weak_ptr != nullptr) {
       weak_ptr->set_mdns_name_registration_status(
           MdnsNameRegistrationStatus::kCompleted);
+      recordreplay::Assert("Port::MaybeObfuscateAddress #2 %d",
+                           copy.address().IsAnyIP());
       weak_ptr->FinishAddingAddress(copy, is_final);
     }
   };
@@ -330,6 +337,7 @@ bool Port::MaybeObfuscateAddress(Candidate* c,
 }
 
 void Port::FinishAddingAddress(const Candidate& c, bool is_final) {
+  recordreplay::Assert("Port::FinishAddingAddress %d", c.address().IsAnyIP());
   candidates_.push_back(c);
   SignalCandidateReady(this, c);
 
