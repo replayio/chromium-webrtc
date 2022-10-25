@@ -174,11 +174,11 @@ std::unique_ptr<SessionDescriptionInterface> CreateSessionDescription(
 }
 
 JsepSessionDescription::JsepSessionDescription(SdpType type) : type_(type) {
-  recordreplay::RegisterPointer(this);
+  recordreplay::RegisterPointer("JsepSessionDescription", this);
 }
 
 JsepSessionDescription::JsepSessionDescription(const std::string& type) {
-  recordreplay::RegisterPointer(this);
+  recordreplay::RegisterPointer("JsepSessionDescription", this);
   absl::optional<SdpType> maybe_type = SdpTypeFromString(type);
   if (maybe_type) {
     type_ = *maybe_type;
@@ -199,7 +199,7 @@ JsepSessionDescription::JsepSessionDescription(
       session_id_(session_id),
       session_version_(session_version),
       type_(type) {
-  recordreplay::RegisterPointer(this);
+  recordreplay::RegisterPointer("JsepSessionDescription", this);
   recordreplay::Assert("JsepSessionDescription %lu", session_id.length());
   RTC_DCHECK(description_);
   candidate_collection_.resize(number_of_mediasections());
