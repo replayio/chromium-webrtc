@@ -11,6 +11,7 @@
 #include "rtc_base/helpers.h"
 
 #include <openssl/rand.h>
+#include <sys/random.h>
 
 #include <cstdint>
 #include <limits>
@@ -40,12 +41,12 @@ class SecureRandomGenerator : public RandomGenerator {
   ~SecureRandomGenerator() override {}
   bool Init(const void* seed, size_t len) override { return true; }
   bool Generate(void* buf, size_t len) override {
-    bool rv = (RAND_bytes(reinterpret_cast<unsigned char*>(buf), len) > 0);
-
-    // RAND_bytes can behave differently when replaying.
-    recordreplay::RecordReplayBytes("SecureRandomGenerator", buf, len);
-
-    return rv;
+    // Avoid calling RAND_bytes when recording/replaying as it can behave in
+    // non-deterministic ways.
+    if (recordreplay::IsRecordingOrReplaying()) {
+      return getrandom(buf, len, 0) == (ssize_t)len;
+    }
+    return (RAND_bytes(reinterpret_cast<unsigned char*>(buf), len) > 0);
   }
 };
 
