@@ -70,7 +70,7 @@ TEST(VideoStreamTest, ReceivesFramesFromFileBasedStreams) {
   EXPECT_GE(frame_counts[1], expected_counts[1]);
 }
 
-TEST(VideoStreamTest, RecievesVp8SimulcastFrames) {
+TEST(VideoStreamTest, ReceivesVp8SimulcastFrames) {
   TimeDelta kRunTime = TimeDelta::Millis(500);
   int kFrameRate = 30;
 
@@ -102,8 +102,11 @@ TEST(VideoStreamTest, RecievesVp8SimulcastFrames) {
       c->source.generator.height = 768;
       c->encoder.implementation = CodecImpl::kSoftware;
       c->encoder.codec = Codec::kVideoCodecVP8;
-      // By enabling multiple spatial layers, simulcast will be enabled for VP8.
-      c->encoder.layers.spatial = 3;
+      // Enable simulcast.
+      c->encoder.simulcast_streams = {webrtc::ScalabilityMode::kL1T1,
+                                      webrtc::ScalabilityMode::kL1T1,
+                                      webrtc::ScalabilityMode::kL1T1};
+
     });
     s.RunFor(kRunTime);
   }
@@ -130,7 +133,9 @@ TEST(VideoStreamTest, SendsNacksOnLoss) {
   auto video = s.CreateVideoStream(route->forward(), VideoStreamConfig());
   s.RunFor(TimeDelta::Seconds(1));
   int retransmit_packets = 0;
-  for (const auto& substream : video->send()->GetStats().substreams) {
+  VideoSendStream::Stats stats;
+  route->first()->SendTask([&]() { stats = video->send()->GetStats(); });
+  for (const auto& substream : stats.substreams) {
     retransmit_packets += substream.second.rtp_stats.retransmitted.packets;
   }
   EXPECT_GT(retransmit_packets, 0);
@@ -152,7 +157,8 @@ TEST(VideoStreamTest, SendsFecWithUlpFec) {
     c->stream.use_ulpfec = true;
   });
   s.RunFor(TimeDelta::Seconds(5));
-  VideoSendStream::Stats video_stats = video->send()->GetStats();
+  VideoSendStream::Stats video_stats;
+  route->first()->SendTask([&]() { video_stats = video->send()->GetStats(); });
   EXPECT_GT(video_stats.substreams.begin()->second.rtp_stats.fec.packets, 0u);
 }
 TEST(VideoStreamTest, SendsFecWithFlexFec) {
@@ -169,7 +175,8 @@ TEST(VideoStreamTest, SendsFecWithFlexFec) {
     c->stream.use_flexfec = true;
   });
   s.RunFor(TimeDelta::Seconds(5));
-  VideoSendStream::Stats video_stats = video->send()->GetStats();
+  VideoSendStream::Stats video_stats;
+  route->first()->SendTask([&]() { video_stats = video->send()->GetStats(); });
   EXPECT_GT(video_stats.substreams.begin()->second.rtp_stats.fec.packets, 0u);
 }
 
@@ -209,7 +216,7 @@ TEST(VideoStreamTest, ResolutionAdaptsToAvailableBandwidth) {
     c->encoder.implementation = CodecImpl::kSoftware;
     c->encoder.codec = Codec::kVideoCodecVP9;
     // Enable SVC.
-    c->encoder.layers.spatial = 2;
+    c->encoder.simulcast_streams = {webrtc::ScalabilityMode::kL2T1};
   });
 
   // Run for a few seconds, until streams have stabilized,

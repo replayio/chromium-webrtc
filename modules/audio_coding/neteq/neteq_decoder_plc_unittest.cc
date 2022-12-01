@@ -23,7 +23,6 @@
 #include "modules/audio_coding/neteq/tools/input_audio_file.h"
 #include "modules/audio_coding/neteq/tools/neteq_test.h"
 #include "rtc_base/numerics/safe_conversions.h"
-#include "rtc_base/ref_counted_object.h"
 #include "test/audio_decoder_proxy_factory.h"
 #include "test/gtest.h"
 #include "test/testsupport/file_utils.h"
@@ -208,7 +207,7 @@ TestStatistics RunTest(int loss_cadence,
 
   NetEqTest neteq_test(
       config, /*decoder_factory=*/
-      new rtc::RefCountedObject<test::AudioDecoderProxyFactory>(&dec),
+      rtc::make_ref_counted<test::AudioDecoderProxyFactory>(&dec),
       /*codecs=*/decoders, /*text_log=*/nullptr, /*neteq_factory=*/nullptr,
       /*input=*/std::move(lossy_input), std::move(output), callbacks);
   EXPECT_LE(kRunTimeMs, neteq_test.Run());

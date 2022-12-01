@@ -80,15 +80,15 @@ namespace {
 // an event indicating that the test was OK.
 static constexpr size_t kNumCallbacks = 10;
 // Max amount of time we wait for an event to be set while counting callbacks.
-static constexpr size_t kTestTimeOutInMilliseconds = 10 * 1000;
+static constexpr TimeDelta kTestTimeOut = TimeDelta::Seconds(10);
 // Average number of audio callbacks per second assuming 10ms packet size.
 static constexpr size_t kNumCallbacksPerSecond = 100;
 // Run the full-duplex test during this time (unit is in seconds).
-static constexpr size_t kFullDuplexTimeInSec = 5;
+static constexpr TimeDelta kFullDuplexTime = TimeDelta::Seconds(5);
 // Length of round-trip latency measurements. Number of deteced impulses
-// shall be kImpulseFrequencyInHz * kMeasureLatencyTimeInSec - 1 since the
+// shall be kImpulseFrequencyInHz * kMeasureLatencyTime - 1 since the
 // last transmitted pulse is not used.
-static constexpr size_t kMeasureLatencyTimeInSec = 10;
+static constexpr TimeDelta kMeasureLatencyTime = TimeDelta::Seconds(10);
 // Sets the number of impulses per second in the latency test.
 static constexpr size_t kImpulseFrequencyInHz = 1;
 // Utilized in round-trip latency measurements to avoid capturing noise samples.
@@ -162,21 +162,21 @@ class FifoAudioStream : public AudioStream {
         // channel configuration. No conversion is needed.
         std::copy(buffer.begin(), buffer.end(), destination.begin());
       } else if (destination.size() == 2 * buffer.size()) {
-        // Recorded input signal in |buffer| is in mono. Do channel upmix to
+        // Recorded input signal in `buffer` is in mono. Do channel upmix to
         // match stereo output (1 -> 2).
         for (size_t i = 0; i < buffer.size(); ++i) {
           destination[2 * i] = buffer[i];
           destination[2 * i + 1] = buffer[i];
         }
       } else if (buffer.size() == 2 * destination.size()) {
-        // Recorded input signal in |buffer| is in stereo. Do channel downmix
+        // Recorded input signal in `buffer` is in stereo. Do channel downmix
         // to match mono output (2 -> 1).
         for (size_t i = 0; i < destination.size(); ++i) {
           destination[i] =
               (static_cast<int32_t>(buffer[2 * i]) + buffer[2 * i + 1]) / 2;
         }
       } else {
-        RTC_NOTREACHED() << "Required conversion is not support";
+        RTC_DCHECK_NOTREACHED() << "Required conversion is not support";
       }
       fifo_.pop_front();
     }
@@ -219,7 +219,7 @@ class LatencyAudioStream : public AudioStream {
     write_thread_checker_.Detach();
   }
 
-  // Insert periodic impulses in first two samples of |destination|.
+  // Insert periodic impulses in first two samples of `destination`.
   void Read(rtc::ArrayView<int16_t> destination) override {
     RTC_DCHECK_RUN_ON(&read_thread_checker_);
     if (read_count_ == 0) {
@@ -240,7 +240,7 @@ class LatencyAudioStream : public AudioStream {
     }
   }
 
-  // Detect received impulses in |source|, derive time between transmission and
+  // Detect received impulses in `source`, derive time between transmission and
   // detection and add the calculated delay to list of latencies.
   void Write(rtc::ArrayView<const int16_t> source) override {
     RTC_DCHECK_RUN_ON(&write_thread_checker_);
@@ -249,7 +249,7 @@ class LatencyAudioStream : public AudioStream {
     write_count_++;
     if (!pulse_time_) {
       // Avoid detection of new impulse response until a new impulse has
-      // been transmitted (sets |pulse_time_| to value larger than zero).
+      // been transmitted (sets `pulse_time_` to value larger than zero).
       return;
     }
     // Find index (element position in vector) of the max element.
@@ -267,7 +267,7 @@ class LatencyAudioStream : public AudioStream {
       // Total latency is the difference between transmit time and detection
       // tome plus the extra delay within the buffer in which we detected the
       // received impulse. It is transmitted at sample 0 but can be received
-      // at sample N where N > 0. The term |extra_delay| accounts for N and it
+      // at sample N where N > 0. The term `extra_delay` accounts for N and it
       // is a value between 0 and 10ms.
       latencies_.push_back(now_time - *pulse_time_ + extra_delay);
       pulse_time_.reset();
@@ -586,7 +586,7 @@ class MAYBE_AudioDeviceTest
   rtc::scoped_refptr<AudioDeviceModuleForTest> CreateAudioDevice() {
     // Use the default factory for kPlatformDefaultAudio and a special factory
     // CreateWindowsCoreAudioAudioDeviceModuleForTest() for kWindowsCoreAudio2.
-    // The value of |audio_layer_| is set at construction by GetParam() and two
+    // The value of `audio_layer_` is set at construction by GetParam() and two
     // different layers are tested on Windows only.
     if (audio_layer_ == AudioDeviceModule::kPlatformDefaultAudio) {
       return AudioDeviceModule::CreateForTest(audio_layer_,
@@ -974,7 +974,7 @@ TEST_P(MAYBE_AudioDeviceTest, StartStopPlayoutWithInternalRestart) {
       .Times(AtLeast(kNumCallbacks));
   EXPECT_EQ(0, audio_device()->RegisterAudioCallback(&mock));
   StartPlayout();
-  event()->Wait(kTestTimeOutInMilliseconds);
+  event()->Wait(kTestTimeOut);
   EXPECT_TRUE(audio_device()->Playing());
   // Restart playout but without stopping the internal audio thread.
   // This procedure uses a non-public test API and it emulates what happens
@@ -997,7 +997,7 @@ TEST_P(MAYBE_AudioDeviceTest, StartStopPlayoutWithInternalRestart) {
   mock.ResetCallbackCounters();
   EXPECT_CALL(mock, NeedMorePlayData(_, _, _, _, NotNull(), _, _, _))
       .Times(AtLeast(kNumCallbacks));
-  event()->Wait(kTestTimeOutInMilliseconds);
+  event()->Wait(kTestTimeOut);
   EXPECT_TRUE(audio_device()->Playing());
   // Stop playout and the audio thread after successful internal restart.
   StopPlayout();
@@ -1020,7 +1020,7 @@ TEST_P(MAYBE_AudioDeviceTest, StartStopRecordingWithInternalRestart) {
       .Times(AtLeast(kNumCallbacks));
   EXPECT_EQ(0, audio_device()->RegisterAudioCallback(&mock));
   StartRecording();
-  event()->Wait(kTestTimeOutInMilliseconds);
+  event()->Wait(kTestTimeOut);
   EXPECT_TRUE(audio_device()->Recording());
   // Restart recording but without stopping the internal audio thread.
   // This procedure uses a non-public test API and it emulates what happens
@@ -1044,7 +1044,7 @@ TEST_P(MAYBE_AudioDeviceTest, StartStopRecordingWithInternalRestart) {
   EXPECT_CALL(mock, RecordedDataIsAvailable(NotNull(), _, _, _, _, Ge(0u), 0, _,
                                             false, _))
       .Times(AtLeast(kNumCallbacks));
-  event()->Wait(kTestTimeOutInMilliseconds);
+  event()->Wait(kTestTimeOut);
   EXPECT_TRUE(audio_device()->Recording());
   // Stop recording and the audio thread after successful internal restart.
   StopRecording();
@@ -1065,7 +1065,7 @@ TEST_P(MAYBE_AudioDeviceTest, StartPlayoutVerifyCallbacks) {
       .Times(AtLeast(kNumCallbacks));
   EXPECT_EQ(0, audio_device()->RegisterAudioCallback(&mock));
   StartPlayout();
-  event()->Wait(kTestTimeOutInMilliseconds);
+  event()->Wait(kTestTimeOut);
   StopPlayout();
   PreTearDown();
 }
@@ -1098,7 +1098,7 @@ TEST_P(MAYBE_AudioDeviceTest, MAYBE_StartRecordingVerifyCallbacks) {
       .Times(AtLeast(kNumCallbacks));
   EXPECT_EQ(0, audio_device()->RegisterAudioCallback(&mock));
   StartRecording();
-  event()->Wait(kTestTimeOutInMilliseconds);
+  event()->Wait(kTestTimeOut);
   StopRecording();
   PreTearDown();
 }
@@ -1117,7 +1117,7 @@ TEST_P(MAYBE_AudioDeviceTest, MAYBE_StartPlayoutAndRecordingVerifyCallbacks) {
   EXPECT_EQ(0, audio_device()->RegisterAudioCallback(&mock));
   StartPlayout();
   StartRecording();
-  event()->Wait(kTestTimeOutInMilliseconds);
+  event()->Wait(kTestTimeOut);
   StopRecording();
   StopPlayout();
   PreTearDown();
@@ -1140,7 +1140,7 @@ TEST_P(MAYBE_AudioDeviceTest, RunPlayoutAndRecordingInFullDuplex) {
   NiceMock<MockAudioTransport> mock(TransportType::kPlayAndRecord);
   FifoAudioStream audio_stream;
   mock.HandleCallbacks(event(), &audio_stream,
-                       kFullDuplexTimeInSec * kNumCallbacksPerSecond);
+                       kFullDuplexTime.seconds() * kNumCallbacksPerSecond);
   EXPECT_EQ(0, audio_device()->RegisterAudioCallback(&mock));
   // Run both sides using the same channel configuration to avoid conversions
   // between mono/stereo while running in full duplex mode. Also, some devices
@@ -1151,8 +1151,7 @@ TEST_P(MAYBE_AudioDeviceTest, RunPlayoutAndRecordingInFullDuplex) {
   EXPECT_EQ(0, audio_device()->SetSpeakerVolume(0));
   StartPlayout();
   StartRecording();
-  event()->Wait(static_cast<int>(
-      std::max(kTestTimeOutInMilliseconds, 1000 * kFullDuplexTimeInSec)));
+  event()->Wait(std::max(kTestTimeOut, kFullDuplexTime));
   StopRecording();
   StopPlayout();
   PreTearDown();
@@ -1204,14 +1203,13 @@ TEST_P(MAYBE_AudioDeviceTest, DISABLED_MeasureLoopbackLatency) {
   NiceMock<MockAudioTransport> mock(TransportType::kPlayAndRecord);
   LatencyAudioStream audio_stream;
   mock.HandleCallbacks(event(), &audio_stream,
-                       kMeasureLatencyTimeInSec * kNumCallbacksPerSecond);
+                       kMeasureLatencyTime.seconds() * kNumCallbacksPerSecond);
   EXPECT_EQ(0, audio_device()->RegisterAudioCallback(&mock));
   EXPECT_EQ(0, audio_device()->SetStereoPlayout(true));
   EXPECT_EQ(0, audio_device()->SetStereoRecording(true));
   StartPlayout();
   StartRecording();
-  event()->Wait(static_cast<int>(
-      std::max(kTestTimeOutInMilliseconds, 1000 * kMeasureLatencyTimeInSec)));
+  event()->Wait(std::max(kTestTimeOut, kMeasureLatencyTime));
   StopRecording();
   StopPlayout();
   // Avoid concurrent access to audio_stream.
@@ -1219,7 +1217,7 @@ TEST_P(MAYBE_AudioDeviceTest, DISABLED_MeasureLoopbackLatency) {
   // Verify that a sufficient number of transmitted impulses are detected.
   EXPECT_GE(audio_stream.num_latency_values(),
             static_cast<size_t>(
-                kImpulseFrequencyInHz * kMeasureLatencyTimeInSec - 2));
+                kImpulseFrequencyInHz * kMeasureLatencyTime.seconds() - 2));
   // Print out min, max and average delay values for debugging purposes.
   audio_stream.PrintResults();
 }

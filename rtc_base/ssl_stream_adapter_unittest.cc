@@ -8,12 +8,16 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "rtc_base/ssl_stream_adapter.h"
+
 #include <algorithm>
 #include <memory>
 #include <set>
 #include <string>
 
 #include "absl/memory/memory.h"
+#include "absl/strings/string_view.h"
+#include "api/task_queue/pending_task_safety_flag.h"
 #include "rtc_base/buffer_queue.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/gunit.h"
@@ -24,16 +28,14 @@
 #include "rtc_base/openssl_stream_adapter.h"
 #include "rtc_base/ssl_adapter.h"
 #include "rtc_base/ssl_identity.h"
-#include "rtc_base/ssl_stream_adapter.h"
 #include "rtc_base/stream.h"
-#include "rtc_base/task_utils/pending_task_safety_flag.h"
-#include "rtc_base/task_utils/to_queued_task.h"
 #include "test/field_trial.h"
 
 using ::testing::Combine;
 using ::testing::tuple;
 using ::testing::Values;
 using ::testing::WithParamInterface;
+using ::webrtc::SafeTask;
 
 static const int kBlockSize = 4096;
 static const char kExporterLabel[] = "label";
@@ -147,7 +149,7 @@ class SSLDummyStreamBase : public rtc::StreamInterface,
                            public sigslot::has_slots<> {
  public:
   SSLDummyStreamBase(SSLStreamAdapterTestBase* test,
-                     const std::string& side,
+                     absl::string_view side,
                      rtc::StreamInterface* in,
                      rtc::StreamInterface* out)
       : test_base_(test), side_(side), in_(in), out_(out), first_packet_(true) {
@@ -218,7 +220,7 @@ class SSLDummyStreamBase : public rtc::StreamInterface,
 
  private:
   void PostEvent(int events, int err) {
-    thread_->PostTask(webrtc::ToQueuedTask(task_safety_, [this, events, err]() {
+    thread_->PostTask(SafeTask(task_safety_.flag(), [this, events, err]() {
       SignalEvent(this, events, err);
     }));
   }
@@ -235,7 +237,7 @@ class SSLDummyStreamBase : public rtc::StreamInterface,
 class SSLDummyStreamTLS : public SSLDummyStreamBase {
  public:
   SSLDummyStreamTLS(SSLStreamAdapterTestBase* test,
-                    const std::string& side,
+                    absl::string_view side,
                     rtc::FifoBuffer* in,
                     rtc::FifoBuffer* out)
       : SSLDummyStreamBase(test, side, in, out) {}
@@ -290,7 +292,7 @@ class BufferQueueStream : public rtc::StreamInterface {
 
  private:
   void PostEvent(int events, int err) {
-    thread_->PostTask(webrtc::ToQueuedTask(task_safety_, [this, events, err]() {
+    thread_->PostTask(SafeTask(task_safety_.flag(), [this, events, err]() {
       SignalEvent(this, events, err);
     }));
   }
@@ -303,7 +305,7 @@ class BufferQueueStream : public rtc::StreamInterface {
 class SSLDummyStreamDTLS : public SSLDummyStreamBase {
  public:
   SSLDummyStreamDTLS(SSLStreamAdapterTestBase* test,
-                     const std::string& side,
+                     absl::string_view side,
                      BufferQueueStream* in,
                      BufferQueueStream* out)
       : SSLDummyStreamBase(test, side, in, out) {}
@@ -317,8 +319,8 @@ class SSLStreamAdapterTestBase : public ::testing::Test,
                                  public sigslot::has_slots<> {
  public:
   SSLStreamAdapterTestBase(
-      const std::string& client_cert_pem,
-      const std::string& client_private_key_pem,
+      absl::string_view client_cert_pem,
+      absl::string_view client_private_key_pem,
       bool dtls,
       rtc::KeyParams client_key_type = rtc::KeyParams(rtc::KT_DEFAULT),
       rtc::KeyParams server_key_type = rtc::KeyParams(rtc::KT_DEFAULT))
@@ -378,7 +380,7 @@ class SSLStreamAdapterTestBase : public ::testing::Test,
   virtual void CreateStreams() = 0;
 
   // Recreate the client/server identities with the specified validity period.
-  // |not_before| and |not_after| are offsets from the current time in number
+  // `not_before` and `not_after` are offsets from the current time in number
   // of seconds.
   void ResetIdentitiesWithValidity(int not_before, int not_after) {
     CreateStreams();
@@ -506,6 +508,49 @@ class SSLStreamAdapterTestBase : public ::testing::Test,
       EXPECT_TRUE_WAIT(client_ssl_->GetState() == rtc::SS_CLOSED,
                        handshake_wait_);
     }
+  }
+
+  // This tests that we give up after 12 DTLS resends.
+  void TestHandshakeTimeout() {
+    rtc::ScopedFakeClock clock;
+    int64_t time_start = clock.TimeNanos();
+    webrtc::TimeDelta time_increment = webrtc::TimeDelta::Millis(1000);
+    server_ssl_->SetMode(dtls_ ? rtc::SSL_MODE_DTLS : rtc::SSL_MODE_TLS);
+    client_ssl_->SetMode(dtls_ ? rtc::SSL_MODE_DTLS : rtc::SSL_MODE_TLS);
+
+    if (!dtls_) {
+      // Make sure we simulate a reliable network for TLS.
+      // This is just a check to make sure that people don't write wrong
+      // tests.
+      RTC_CHECK_EQ(1460, mtu_);
+      RTC_CHECK(!loss_);
+      RTC_CHECK(!lose_first_packet_);
+    }
+
+    if (!identities_set_)
+      SetPeerIdentitiesByDigest(true, true);
+
+    // Start the handshake
+    int rv;
+
+    server_ssl_->SetServerRole();
+    rv = server_ssl_->StartSSL();
+    ASSERT_EQ(0, rv);
+
+    rv = client_ssl_->StartSSL();
+    ASSERT_EQ(0, rv);
+
+    // Now wait for the handshake to timeout (or fail after an hour of simulated
+    // time).
+    while (client_ssl_->GetState() == rtc::SS_OPENING &&
+           (rtc::TimeDiff(clock.TimeNanos(), time_start) <
+            3600 * rtc::kNumNanosecsPerSec)) {
+      EXPECT_TRUE_WAIT(!((client_ssl_->GetState() == rtc::SS_OPEN) &&
+                         (server_ssl_->GetState() == rtc::SS_OPEN)),
+                       1000);
+      clock.AdvanceTime(time_increment);
+    }
+    RTC_CHECK_EQ(client_ssl_->GetState(), rtc::SS_CLOSED);
   }
 
   // This tests that the handshake can complete before the identity is verified,
@@ -683,7 +728,7 @@ class SSLStreamAdapterTestBase : public ::testing::Test,
       return server_ssl_->GetSslVersion();
   }
 
-  bool ExportKeyingMaterial(const char* label,
+  bool ExportKeyingMaterial(absl::string_view label,
                             const unsigned char* context,
                             size_t context_len,
                             bool use_context,
@@ -717,6 +762,7 @@ class SSLStreamAdapterTestBase : public ::testing::Test,
     return server_ssl_->GetIdentityForTesting();
   }
 
+  rtc::AutoThread main_thread_;
   std::string client_cert_pem_;
   std::string client_private_key_pem_;
   rtc::KeyParams client_key_type_;
@@ -864,8 +910,8 @@ class SSLStreamAdapterTestDTLSBase : public SSLStreamAdapterTestBase {
         count_(0),
         sent_(0) {}
 
-  SSLStreamAdapterTestDTLSBase(const std::string& cert_pem,
-                               const std::string& private_key_pem)
+  SSLStreamAdapterTestDTLSBase(absl::string_view cert_pem,
+                               absl::string_view private_key_pem)
       : SSLStreamAdapterTestBase(cert_pem, private_key_pem, true),
         client_buffer_(kBufferCapacity, kDefaultBufferSize),
         server_buffer_(kBufferCapacity, kDefaultBufferSize),
@@ -983,8 +1029,8 @@ class SSLStreamAdapterTestDTLS
       : SSLStreamAdapterTestDTLSBase(::testing::get<0>(GetParam()),
                                      ::testing::get<1>(GetParam())) {}
 
-  SSLStreamAdapterTestDTLS(const std::string& cert_pem,
-                           const std::string& private_key_pem)
+  SSLStreamAdapterTestDTLS(absl::string_view cert_pem,
+                           absl::string_view private_key_pem)
       : SSLStreamAdapterTestDTLSBase(cert_pem, private_key_pem) {}
 };
 
@@ -1215,6 +1261,12 @@ TEST_P(SSLStreamAdapterTestDTLS, DISABLED_TestDTLSConnectWithSmallMtu) {
   TestHandshake();
 }
 
+// Test a handshake with total loss and timing out.
+TEST_P(SSLStreamAdapterTestDTLS, TestDTLSConnectTimeout) {
+  SetLoss(100);
+  TestHandshakeTimeout();
+}
+
 // Test transfer -- trivial
 TEST_P(SSLStreamAdapterTestDTLS, TestDTLSTransfer) {
   TestHandshake();
@@ -1245,7 +1297,7 @@ TEST_P(SSLStreamAdapterTestDTLS, TestDTLSDelayedIdentityWithBogusDigest) {
 // Test DTLS-SRTP with all high ciphers
 TEST_P(SSLStreamAdapterTestDTLS, TestDTLSSrtpHigh) {
   std::vector<int> high;
-  high.push_back(rtc::SRTP_AES128_CM_SHA1_80);
+  high.push_back(rtc::kSrtpAes128CmSha1_80);
   SetDtlsSrtpCryptoSuites(high, true);
   SetDtlsSrtpCryptoSuites(high, false);
   TestHandshake();
@@ -1256,13 +1308,13 @@ TEST_P(SSLStreamAdapterTestDTLS, TestDTLSSrtpHigh) {
   ASSERT_TRUE(GetDtlsSrtpCryptoSuite(false, &server_cipher));
 
   ASSERT_EQ(client_cipher, server_cipher);
-  ASSERT_EQ(client_cipher, rtc::SRTP_AES128_CM_SHA1_80);
+  ASSERT_EQ(client_cipher, rtc::kSrtpAes128CmSha1_80);
 }
 
 // Test DTLS-SRTP with all low ciphers
 TEST_P(SSLStreamAdapterTestDTLS, TestDTLSSrtpLow) {
   std::vector<int> low;
-  low.push_back(rtc::SRTP_AES128_CM_SHA1_32);
+  low.push_back(rtc::kSrtpAes128CmSha1_32);
   SetDtlsSrtpCryptoSuites(low, true);
   SetDtlsSrtpCryptoSuites(low, false);
   TestHandshake();
@@ -1273,15 +1325,15 @@ TEST_P(SSLStreamAdapterTestDTLS, TestDTLSSrtpLow) {
   ASSERT_TRUE(GetDtlsSrtpCryptoSuite(false, &server_cipher));
 
   ASSERT_EQ(client_cipher, server_cipher);
-  ASSERT_EQ(client_cipher, rtc::SRTP_AES128_CM_SHA1_32);
+  ASSERT_EQ(client_cipher, rtc::kSrtpAes128CmSha1_32);
 }
 
 // Test DTLS-SRTP with a mismatch -- should not converge
 TEST_P(SSLStreamAdapterTestDTLS, TestDTLSSrtpHighLow) {
   std::vector<int> high;
-  high.push_back(rtc::SRTP_AES128_CM_SHA1_80);
+  high.push_back(rtc::kSrtpAes128CmSha1_80);
   std::vector<int> low;
-  low.push_back(rtc::SRTP_AES128_CM_SHA1_32);
+  low.push_back(rtc::kSrtpAes128CmSha1_32);
   SetDtlsSrtpCryptoSuites(high, true);
   SetDtlsSrtpCryptoSuites(low, false);
   TestHandshake();
@@ -1295,8 +1347,8 @@ TEST_P(SSLStreamAdapterTestDTLS, TestDTLSSrtpHighLow) {
 // Test DTLS-SRTP with each side being mixed -- should select high
 TEST_P(SSLStreamAdapterTestDTLS, TestDTLSSrtpMixed) {
   std::vector<int> mixed;
-  mixed.push_back(rtc::SRTP_AES128_CM_SHA1_80);
-  mixed.push_back(rtc::SRTP_AES128_CM_SHA1_32);
+  mixed.push_back(rtc::kSrtpAes128CmSha1_80);
+  mixed.push_back(rtc::kSrtpAes128CmSha1_32);
   SetDtlsSrtpCryptoSuites(mixed, true);
   SetDtlsSrtpCryptoSuites(mixed, false);
   TestHandshake();
@@ -1307,13 +1359,13 @@ TEST_P(SSLStreamAdapterTestDTLS, TestDTLSSrtpMixed) {
   ASSERT_TRUE(GetDtlsSrtpCryptoSuite(false, &server_cipher));
 
   ASSERT_EQ(client_cipher, server_cipher);
-  ASSERT_EQ(client_cipher, rtc::SRTP_AES128_CM_SHA1_80);
+  ASSERT_EQ(client_cipher, rtc::kSrtpAes128CmSha1_80);
 }
 
 // Test DTLS-SRTP with all GCM-128 ciphers.
 TEST_P(SSLStreamAdapterTestDTLS, TestDTLSSrtpGCM128) {
   std::vector<int> gcm128;
-  gcm128.push_back(rtc::SRTP_AEAD_AES_128_GCM);
+  gcm128.push_back(rtc::kSrtpAeadAes128Gcm);
   SetDtlsSrtpCryptoSuites(gcm128, true);
   SetDtlsSrtpCryptoSuites(gcm128, false);
   TestHandshake();
@@ -1324,13 +1376,13 @@ TEST_P(SSLStreamAdapterTestDTLS, TestDTLSSrtpGCM128) {
   ASSERT_TRUE(GetDtlsSrtpCryptoSuite(false, &server_cipher));
 
   ASSERT_EQ(client_cipher, server_cipher);
-  ASSERT_EQ(client_cipher, rtc::SRTP_AEAD_AES_128_GCM);
+  ASSERT_EQ(client_cipher, rtc::kSrtpAeadAes128Gcm);
 }
 
 // Test DTLS-SRTP with all GCM-256 ciphers.
 TEST_P(SSLStreamAdapterTestDTLS, TestDTLSSrtpGCM256) {
   std::vector<int> gcm256;
-  gcm256.push_back(rtc::SRTP_AEAD_AES_256_GCM);
+  gcm256.push_back(rtc::kSrtpAeadAes256Gcm);
   SetDtlsSrtpCryptoSuites(gcm256, true);
   SetDtlsSrtpCryptoSuites(gcm256, false);
   TestHandshake();
@@ -1341,15 +1393,15 @@ TEST_P(SSLStreamAdapterTestDTLS, TestDTLSSrtpGCM256) {
   ASSERT_TRUE(GetDtlsSrtpCryptoSuite(false, &server_cipher));
 
   ASSERT_EQ(client_cipher, server_cipher);
-  ASSERT_EQ(client_cipher, rtc::SRTP_AEAD_AES_256_GCM);
+  ASSERT_EQ(client_cipher, rtc::kSrtpAeadAes256Gcm);
 }
 
 // Test DTLS-SRTP with mixed GCM-128/-256 ciphers -- should not converge.
 TEST_P(SSLStreamAdapterTestDTLS, TestDTLSSrtpGCMMismatch) {
   std::vector<int> gcm128;
-  gcm128.push_back(rtc::SRTP_AEAD_AES_128_GCM);
+  gcm128.push_back(rtc::kSrtpAeadAes128Gcm);
   std::vector<int> gcm256;
-  gcm256.push_back(rtc::SRTP_AEAD_AES_256_GCM);
+  gcm256.push_back(rtc::kSrtpAeadAes256Gcm);
   SetDtlsSrtpCryptoSuites(gcm128, true);
   SetDtlsSrtpCryptoSuites(gcm256, false);
   TestHandshake();
@@ -1363,8 +1415,8 @@ TEST_P(SSLStreamAdapterTestDTLS, TestDTLSSrtpGCMMismatch) {
 // Test DTLS-SRTP with both GCM-128/-256 ciphers -- should select GCM-256.
 TEST_P(SSLStreamAdapterTestDTLS, TestDTLSSrtpGCMMixed) {
   std::vector<int> gcmBoth;
-  gcmBoth.push_back(rtc::SRTP_AEAD_AES_256_GCM);
-  gcmBoth.push_back(rtc::SRTP_AEAD_AES_128_GCM);
+  gcmBoth.push_back(rtc::kSrtpAeadAes256Gcm);
+  gcmBoth.push_back(rtc::kSrtpAeadAes128Gcm);
   SetDtlsSrtpCryptoSuites(gcmBoth, true);
   SetDtlsSrtpCryptoSuites(gcmBoth, false);
   TestHandshake();
@@ -1375,7 +1427,7 @@ TEST_P(SSLStreamAdapterTestDTLS, TestDTLSSrtpGCMMixed) {
   ASSERT_TRUE(GetDtlsSrtpCryptoSuite(false, &server_cipher));
 
   ASSERT_EQ(client_cipher, server_cipher);
-  ASSERT_EQ(client_cipher, rtc::SRTP_AEAD_AES_256_GCM);
+  ASSERT_EQ(client_cipher, rtc::kSrtpAeadAes256Gcm);
 }
 
 // Test SRTP cipher suite lengths.
@@ -1383,26 +1435,26 @@ TEST_P(SSLStreamAdapterTestDTLS, TestDTLSSrtpKeyAndSaltLengths) {
   int key_len;
   int salt_len;
 
-  ASSERT_FALSE(rtc::GetSrtpKeyAndSaltLengths(rtc::SRTP_INVALID_CRYPTO_SUITE,
+  ASSERT_FALSE(rtc::GetSrtpKeyAndSaltLengths(rtc::kSrtpInvalidCryptoSuite,
                                              &key_len, &salt_len));
 
-  ASSERT_TRUE(rtc::GetSrtpKeyAndSaltLengths(rtc::SRTP_AES128_CM_SHA1_32,
-                                            &key_len, &salt_len));
+  ASSERT_TRUE(rtc::GetSrtpKeyAndSaltLengths(rtc::kSrtpAes128CmSha1_32, &key_len,
+                                            &salt_len));
   ASSERT_EQ(128 / 8, key_len);
   ASSERT_EQ(112 / 8, salt_len);
 
-  ASSERT_TRUE(rtc::GetSrtpKeyAndSaltLengths(rtc::SRTP_AES128_CM_SHA1_80,
-                                            &key_len, &salt_len));
+  ASSERT_TRUE(rtc::GetSrtpKeyAndSaltLengths(rtc::kSrtpAes128CmSha1_80, &key_len,
+                                            &salt_len));
   ASSERT_EQ(128 / 8, key_len);
   ASSERT_EQ(112 / 8, salt_len);
 
-  ASSERT_TRUE(rtc::GetSrtpKeyAndSaltLengths(rtc::SRTP_AEAD_AES_128_GCM,
-                                            &key_len, &salt_len));
+  ASSERT_TRUE(rtc::GetSrtpKeyAndSaltLengths(rtc::kSrtpAeadAes128Gcm, &key_len,
+                                            &salt_len));
   ASSERT_EQ(128 / 8, key_len);
   ASSERT_EQ(96 / 8, salt_len);
 
-  ASSERT_TRUE(rtc::GetSrtpKeyAndSaltLengths(rtc::SRTP_AEAD_AES_256_GCM,
-                                            &key_len, &salt_len));
+  ASSERT_TRUE(rtc::GetSrtpKeyAndSaltLengths(rtc::kSrtpAeadAes256Gcm, &key_len,
+                                            &salt_len));
   ASSERT_EQ(256 / 8, key_len);
   ASSERT_EQ(96 / 8, salt_len);
 }
@@ -1551,8 +1603,8 @@ class SSLStreamAdapterTestDTLSLegacyProtocols
   // initialized, so we set the experiment while creationg client_ssl_
   // and server_ssl_.
 
-  void ConfigureClient(std::string experiment) {
-    webrtc::test::ScopedFieldTrials trial(experiment);
+  void ConfigureClient(absl::string_view experiment) {
+    webrtc::test::ScopedFieldTrials trial{std::string(experiment)};
     client_stream_ =
         new SSLDummyStreamDTLS(this, "c2s", &client_buffer_, &server_buffer_);
     client_ssl_ =
@@ -1564,8 +1616,8 @@ class SSLStreamAdapterTestDTLSLegacyProtocols
     client_ssl_->SetIdentity(std::move(client_identity));
   }
 
-  void ConfigureServer(std::string experiment) {
-    webrtc::test::ScopedFieldTrials trial(experiment);
+  void ConfigureServer(absl::string_view experiment) {
+    webrtc::test::ScopedFieldTrials trial{std::string(experiment)};
     server_stream_ =
         new SSLDummyStreamDTLS(this, "s2c", &server_buffer_, &client_buffer_);
     server_ssl_ =

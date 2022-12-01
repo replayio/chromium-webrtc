@@ -106,14 +106,12 @@ webrtc::RTCError CheckRtpParametersValues(
                              "num_temporal_layers to an invalid number.");
       }
     }
-    if (i > 0 && (rtp_parameters.encodings[i].num_temporal_layers !=
-                  rtp_parameters.encodings[i - 1].num_temporal_layers)) {
-      LOG_AND_RETURN_ERROR(
-          RTCErrorType::INVALID_MODIFICATION,
-          "Attempted to set RtpParameters num_temporal_layers "
-          "at encoding layer i: " +
-              rtc::ToString(i) +
-              " to a different value than other encoding layers.");
+
+    if (rtp_parameters.encodings[i].requested_resolution &&
+        rtp_parameters.encodings[i].scale_resolution_down_by) {
+      LOG_AND_RETURN_ERROR(RTCErrorType::INVALID_RANGE,
+                           "Attempted to set scale_resolution_down_by and "
+                           "requested_resolution simultaniously.");
     }
   }
 
@@ -161,7 +159,7 @@ webrtc::RTCError CheckRtpParametersInvalidModificationAndValues(
 }
 
 CompositeMediaEngine::CompositeMediaEngine(
-    std::unique_ptr<webrtc::WebRtcKeyValueConfig> trials,
+    std::unique_ptr<webrtc::FieldTrialsView> trials,
     std::unique_ptr<VoiceEngineInterface> audio_engine,
     std::unique_ptr<VideoEngineInterface> video_engine)
     : trials_(std::move(trials)),

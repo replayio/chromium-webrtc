@@ -11,8 +11,10 @@
 #ifndef MODULES_DESKTOP_CAPTURE_WIN_WGC_CAPTURER_WIN_H_
 #define MODULES_DESKTOP_CAPTURE_WIN_WGC_CAPTURER_WIN_H_
 
+#include <DispatcherQueue.h>
 #include <d3d11.h>
 #include <wrl/client.h>
+
 #include <map>
 #include <memory>
 
@@ -24,6 +26,9 @@
 #include "modules/desktop_capture/win/window_capture_utils.h"
 
 namespace webrtc {
+
+// Checks if the WGC API is present and supported on the system.
+bool IsWgcSupported(CaptureType capture_type);
 
 // WgcCapturerWin is initialized with an implementation of this base class,
 // which it uses to find capturable sources of a particular type. This way,
@@ -37,7 +42,8 @@ class SourceEnumerator {
 
 class WindowEnumerator final : public SourceEnumerator {
  public:
-  WindowEnumerator() = default;
+  explicit WindowEnumerator(bool enumerate_current_process_windows)
+      : enumerate_current_process_windows_(enumerate_current_process_windows) {}
 
   WindowEnumerator(const WindowEnumerator&) = delete;
   WindowEnumerator& operator=(const WindowEnumerator&) = delete;
@@ -45,11 +51,15 @@ class WindowEnumerator final : public SourceEnumerator {
   ~WindowEnumerator() override = default;
 
   bool FindAllSources(DesktopCapturer::SourceList* sources) override {
-    return window_capture_helper_.EnumerateCapturableWindows(sources);
+    // WGC fails to capture windows with the WS_EX_TOOLWINDOW style, so we
+    // provide it as a filter to ensure windows with the style are not returned.
+    return window_capture_helper_.EnumerateCapturableWindows(
+        sources, enumerate_current_process_windows_, WS_EX_TOOLWINDOW);
   }
 
  private:
   WindowCaptureHelperWin window_capture_helper_;
+  bool enumerate_current_process_windows_;
 };
 
 class ScreenEnumerator final : public SourceEnumerator {
@@ -62,19 +72,20 @@ class ScreenEnumerator final : public SourceEnumerator {
   ~ScreenEnumerator() override = default;
 
   bool FindAllSources(DesktopCapturer::SourceList* sources) override {
-    return webrtc::GetMonitorList(sources);
+    return webrtc::GetScreenList(sources);
   }
 };
 
 // A capturer that uses the Window.Graphics.Capture APIs. It is suitable for
 // both window and screen capture (but only one type per instance). Consumers
 // should not instantiate this class directly, instead they should use
-// |CreateRawWindowCapturer()| or |CreateRawScreenCapturer()| to receive a
+// `CreateRawWindowCapturer()` or `CreateRawScreenCapturer()` to receive a
 // capturer appropriate for the type of source they want to capture.
 class WgcCapturerWin : public DesktopCapturer {
  public:
   WgcCapturerWin(std::unique_ptr<WgcCaptureSourceFactory> source_factory,
-                 std::unique_ptr<SourceEnumerator> source_enumerator);
+                 std::unique_ptr<SourceEnumerator> source_enumerator,
+                 bool allow_delayed_capturable_check);
 
   WgcCapturerWin(const WgcCapturerWin&) = delete;
   WgcCapturerWin& operator=(const WgcCapturerWin&) = delete;
@@ -82,7 +93,8 @@ class WgcCapturerWin : public DesktopCapturer {
   ~WgcCapturerWin() override;
 
   static std::unique_ptr<DesktopCapturer> CreateRawWindowCapturer(
-      const DesktopCaptureOptions& options);
+      const DesktopCaptureOptions& options,
+      bool allow_delayed_capturable_check = false);
 
   static std::unique_ptr<DesktopCapturer> CreateRawScreenCapturer(
       const DesktopCaptureOptions& options);
@@ -90,6 +102,7 @@ class WgcCapturerWin : public DesktopCapturer {
   // DesktopCapturer interface.
   bool GetSourceList(SourceList* sources) override;
   bool SelectSource(SourceId id) override;
+  bool FocusOnSelectedSource() override;
   void Start(Callback* callback) override;
   void CaptureFrame() override;
 
@@ -97,6 +110,23 @@ class WgcCapturerWin : public DesktopCapturer {
   bool IsSourceBeingCaptured(SourceId id);
 
  private:
+  typedef HRESULT(WINAPI* CreateDispatcherQueueControllerFunc)(
+      DispatcherQueueOptions,
+      ABI::Windows::System::IDispatcherQueueController**);
+
+  // We need to either create or ensure that someone else created a
+  // `DispatcherQueue` on the current thread so that events will be delivered
+  // on the current thread rather than an arbitrary thread. A
+  // `DispatcherQueue`'s lifetime is tied to the thread's, and we don't post
+  // any work to it, so we don't need to hold a reference.
+  bool dispatcher_queue_created_ = false;
+
+  // Statically linking to CoreMessaging.lib is disallowed in Chromium, so we
+  // load it at runtime.
+  HMODULE core_messaging_library_ = NULL;
+  CreateDispatcherQueueControllerFunc create_dispatcher_queue_controller_func_ =
+      nullptr;
+
   // Factory to create a WgcCaptureSource for us whenever SelectSource is
   // called. Initialized at construction with a source-specific implementation.
   std::unique_ptr<WgcCaptureSourceFactory> source_factory_;
@@ -120,6 +150,11 @@ class WgcCapturerWin : public DesktopCapturer {
   // The callback that we deliver frames to, synchronously, before CaptureFrame
   // returns.
   Callback* callback_ = nullptr;
+
+  // WgcCaptureSource::IsCapturable is expensive to run. So, caller can
+  // delay capturable check till capture frame is called if the WgcCapturerWin
+  // is used as a fallback capturer.
+  bool allow_delayed_capturable_check_ = false;
 
   // A Direct3D11 device that is shared amongst the WgcCaptureSessions, who
   // require one to perform the capture.

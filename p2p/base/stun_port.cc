@@ -13,6 +13,8 @@
 #include <utility>
 #include <vector>
 
+#include "absl/memory/memory.h"
+#include "absl/strings/string_view.h"
 #include "api/transport/stun.h"
 #include "base/record_replay.h"
 #include "p2p/base/connection.h"
@@ -20,6 +22,7 @@
 #include "p2p/base/port_allocator.h"
 #include "rtc_base/async_resolver_interface.h"
 #include "rtc_base/checks.h"
+#include "rtc_base/experiments/field_trial_parser.h"
 #include "rtc_base/helpers.h"
 #include "rtc_base/ip_address.h"
 #include "rtc_base/logging.h"
@@ -27,11 +30,31 @@
 
 namespace cricket {
 
+namespace {
+
+bool ResolveStunHostnameForFamily(const webrtc::FieldTrialsView& field_trials) {
+  // Bug fix for STUN hostname resolution on IPv6.
+  // Field trial key reserved in bugs.webrtc.org/14334
+  static constexpr char field_trial_name[] =
+      "WebRTC-IPv6NetworkResolutionFixes";
+  if (!field_trials.IsEnabled(field_trial_name)) {
+    return false;
+  }
+
+  webrtc::FieldTrialParameter<bool> resolve_stun_hostname_for_family(
+      "ResolveStunHostnameForFamily", /*default_value=*/false);
+  webrtc::ParseFieldTrial({&resolve_stun_hostname_for_family},
+                          field_trials.Lookup(field_trial_name));
+  return resolve_stun_hostname_for_family;
+}
+
+}  // namespace
+
 // TODO(?): Move these to a common place (used in relayport too)
 const int RETRY_TIMEOUT = 50 * 1000;  // 50 seconds
 
 // Stop logging errors in UDPPort::SendTo after we have logged
-// |kSendErrorLogLimit| messages. Start again after a successful send.
+// `kSendErrorLogLimit` messages. Start again after a successful send.
 const int kSendErrorLogLimit = 5;
 
 // Handles a binding request sent to the STUN server.
@@ -40,13 +63,13 @@ class StunBindingRequest : public StunRequest {
   StunBindingRequest(UDPPort* port,
                      const rtc::SocketAddress& addr,
                      int64_t start_time)
-      : port_(port), server_addr_(addr), start_time_(start_time) {}
+      : StunRequest(port->request_manager(),
+                    std::make_unique<StunMessage>(STUN_BINDING_REQUEST)),
+        port_(port),
+        server_addr_(addr),
+        start_time_(start_time) {}
 
   const rtc::SocketAddress& server_addr() const { return server_addr_; }
-
-  void Prepare(StunMessage* request) override {
-    request->SetType(STUN_BINDING_REQUEST);
-  }
 
   void OnResponse(StunMessage* response) override {
     const StunAddressAttribute* addr_attr =
@@ -63,7 +86,7 @@ class StunBindingRequest : public StunRequest {
 
     // The keep-alive requests will be stopped after its lifetime has passed.
     if (WithinLifetime(rtc::TimeMillis())) {
-      port_->requests_.SendDelayed(
+      port_->request_manager_.SendDelayed(
           new StunBindingRequest(port_, server_addr_, start_time_),
           port_->stun_keepalive_delay());
     }
@@ -88,7 +111,7 @@ class StunBindingRequest : public StunRequest {
     int64_t now = rtc::TimeMillis();
     if (WithinLifetime(now) &&
         rtc::TimeDiff(now, start_time_) < RETRY_TIMEOUT) {
-      port_->requests_.SendDelayed(
+      port_->request_manager_.SendDelayed(
           new StunBindingRequest(port_, server_addr_, start_time_),
           port_->stun_keepalive_delay());
     }
@@ -99,11 +122,11 @@ class StunBindingRequest : public StunRequest {
                       << port_->Network()->name() << ")";
     port_->OnStunBindingOrResolveRequestFailed(
         server_addr_, SERVER_NOT_REACHABLE_ERROR,
-        "STUN allocate request timed out.");
+        "STUN binding request timed out.");
   }
 
  private:
-  // Returns true if |now| is within the lifetime of the request (a negative
+  // Returns true if `now` is within the lifetime of the request (a negative
   // lifetime means infinite).
   bool WithinLifetime(int64_t now) const {
     int lifetime = port_->stun_keepalive_lifetime();
@@ -116,32 +139,36 @@ class StunBindingRequest : public StunRequest {
   int64_t start_time_;
 };
 
-UDPPort::AddressResolver::AddressResolver(rtc::PacketSocketFactory* factory)
-    : socket_factory_(factory) {}
+UDPPort::AddressResolver::AddressResolver(
+    rtc::PacketSocketFactory* factory,
+    std::function<void(const rtc::SocketAddress&, int)> done_callback)
+    : socket_factory_(factory), done_(std::move(done_callback)) {}
 
-UDPPort::AddressResolver::~AddressResolver() {
-  for (ResolverMap::iterator it = resolvers_.begin(); it != resolvers_.end();
-       ++it) {
-    // TODO(guoweis): Change to asynchronous DNS resolution to prevent the hang
-    // when passing true to the Destroy() which is a safer way to avoid the code
-    // unloaded before the thread exits. Please see webrtc bug 5139.
-    it->second->Destroy(false);
-  }
-}
-
-void UDPPort::AddressResolver::Resolve(const rtc::SocketAddress& address) {
+void UDPPort::AddressResolver::Resolve(
+    const rtc::SocketAddress& address,
+    int family,
+    const webrtc::FieldTrialsView& field_trials) {
   if (resolvers_.find(address) != resolvers_.end())
     return;
 
-  rtc::AsyncResolverInterface* resolver =
-      socket_factory_->CreateAsyncResolver();
-  resolvers_.insert(std::pair<rtc::SocketAddress, rtc::AsyncResolverInterface*>(
-      address, resolver));
+  auto resolver = socket_factory_->CreateAsyncDnsResolver();
+  auto resolver_ptr = resolver.get();
+  std::pair<rtc::SocketAddress,
+            std::unique_ptr<webrtc::AsyncDnsResolverInterface>>
+      pair = std::make_pair(address, std::move(resolver));
 
-  resolver->SignalDone.connect(this,
-                               &UDPPort::AddressResolver::OnResolveResult);
-
-  resolver->Start(address);
+  resolvers_.insert(std::move(pair));
+  auto callback = [this, address] {
+    ResolverMap::const_iterator it = resolvers_.find(address);
+    if (it != resolvers_.end()) {
+      done_(it->first, it->second->result().GetError());
+    }
+  };
+  if (ResolveStunHostnameForFamily(field_trials)) {
+    resolver_ptr->Start(address, family, std::move(callback));
+  } else {
+    resolver_ptr->Start(address, std::move(callback));
+  }
 }
 
 bool UDPPort::AddressResolver::GetResolvedAddress(
@@ -152,48 +179,45 @@ bool UDPPort::AddressResolver::GetResolvedAddress(
   if (it == resolvers_.end())
     return false;
 
-  return it->second->GetResolvedAddress(family, output);
-}
-
-void UDPPort::AddressResolver::OnResolveResult(
-    rtc::AsyncResolverInterface* resolver) {
-  for (ResolverMap::iterator it = resolvers_.begin(); it != resolvers_.end();
-       ++it) {
-    if (it->second == resolver) {
-      SignalDone(it->first, resolver->GetError());
-      return;
-    }
-  }
+  return it->second->result().GetResolvedAddress(family, output);
 }
 
 UDPPort::UDPPort(rtc::Thread* thread,
                  rtc::PacketSocketFactory* factory,
-                 rtc::Network* network,
+                 const rtc::Network* network,
                  rtc::AsyncPacketSocket* socket,
-                 const std::string& username,
-                 const std::string& password,
-                 const std::string& origin,
-                 bool emit_local_for_anyaddress)
-    : Port(thread, LOCAL_PORT_TYPE, factory, network, username, password),
-      requests_(thread),
+                 absl::string_view username,
+                 absl::string_view password,
+                 bool emit_local_for_anyaddress,
+                 const webrtc::FieldTrialsView* field_trials)
+    : Port(thread,
+           LOCAL_PORT_TYPE,
+           factory,
+           network,
+           username,
+           password,
+           field_trials),
+      request_manager_(
+          thread,
+          [this](const void* data, size_t size, StunRequest* request) {
+            OnSendPacket(data, size, request);
+          }),
       socket_(socket),
       error_(0),
       ready_(false),
       stun_keepalive_delay_(STUN_KEEPALIVE_INTERVAL),
       dscp_(rtc::DSCP_NO_CHANGE),
-      emit_local_for_anyaddress_(emit_local_for_anyaddress) {
-  requests_.set_origin(origin);
-}
+      emit_local_for_anyaddress_(emit_local_for_anyaddress) {}
 
 UDPPort::UDPPort(rtc::Thread* thread,
                  rtc::PacketSocketFactory* factory,
-                 rtc::Network* network,
+                 const rtc::Network* network,
                  uint16_t min_port,
                  uint16_t max_port,
-                 const std::string& username,
-                 const std::string& password,
-                 const std::string& origin,
-                 bool emit_local_for_anyaddress)
+                 absl::string_view username,
+                 absl::string_view password,
+                 bool emit_local_for_anyaddress,
+                 const webrtc::FieldTrialsView* field_trials)
     : Port(thread,
            LOCAL_PORT_TYPE,
            factory,
@@ -201,16 +225,19 @@ UDPPort::UDPPort(rtc::Thread* thread,
            min_port,
            max_port,
            username,
-           password),
-      requests_(thread),
+           password,
+           field_trials),
+      request_manager_(
+          thread,
+          [this](const void* data, size_t size, StunRequest* request) {
+            OnSendPacket(data, size, request);
+          }),
       socket_(nullptr),
       error_(0),
       ready_(false),
       stun_keepalive_delay_(STUN_KEEPALIVE_INTERVAL),
       dscp_(rtc::DSCP_NO_CHANGE),
-      emit_local_for_anyaddress_(emit_local_for_anyaddress) {
-  requests_.set_origin(origin);
-}
+      emit_local_for_anyaddress_(emit_local_for_anyaddress) {}
 
 bool UDPPort::Init() {
   stun_keepalive_lifetime_ = GetStunKeepaliveLifetime();
@@ -227,7 +254,6 @@ bool UDPPort::Init() {
   socket_->SignalSentPacket.connect(this, &UDPPort::OnSentPacket);
   socket_->SignalReadyToSend.connect(this, &UDPPort::OnReadyToSend);
   socket_->SignalAddressReady.connect(this, &UDPPort::OnLocalAddressReady);
-  requests_.SignalSendPacket.connect(this, &UDPPort::OnSendPacket);
   return true;
 }
 
@@ -237,7 +263,7 @@ UDPPort::~UDPPort() {
 }
 
 void UDPPort::PrepareAddress() {
-  RTC_DCHECK(requests_.empty());
+  RTC_DCHECK(request_manager_.empty());
   if (socket_->GetState() == rtc::AsyncPacketSocket::STATE_BOUND) {
     OnLocalAddressReady(socket_, socket_->GetLocalAddress());
   }
@@ -269,7 +295,7 @@ Connection* UDPPort::CreateConnection(const Candidate& address,
   // it would lead to a crash when accessing the local candidate of the
   // connection that would be created below.
   if (Candidates().empty()) {
-    RTC_NOTREACHED();
+    RTC_DCHECK_NOTREACHED();
     return nullptr;
   }
   // When the socket is shared, the srflx candidate is gathered by the UDPPort.
@@ -287,7 +313,7 @@ Connection* UDPPort::CreateConnection(const Candidate& address,
              mdns_name_registration_status() !=
                  MdnsNameRegistrationStatus::kNotStarted);
 
-  Connection* conn = new ProxyConnection(this, 0, address);
+  Connection* conn = new ProxyConnection(NewWeakPtr(), 0, address);
   AddOrReplaceConnection(conn);
   return conn;
 }
@@ -307,7 +333,9 @@ int UDPPort::SendTo(const void* data,
     if (send_error_count_ < kSendErrorLogLimit) {
       ++send_error_count_;
       RTC_LOG(LS_ERROR) << ToString() << ": UDP send of " << size
-                        << " bytes failed with error " << error_;
+                        << " bytes to host " << addr.ToSensitiveString() << " ("
+                        << addr.ToResolvedSensitiveString()
+                        << ") failed with error " << error_;
     }
   } else {
     send_error_count_ = 0;
@@ -350,7 +378,7 @@ bool UDPPort::HandleIncomingPacket(rtc::AsyncPacketSocket* socket,
   return true;
 }
 
-bool UDPPort::SupportsProtocol(const std::string& protocol) const {
+bool UDPPort::SupportsProtocol(absl::string_view protocol) const {
   return protocol == UDP_PROTOCOL_NAME;
 }
 
@@ -372,7 +400,7 @@ void UDPPort::OnLocalAddressReady(rtc::AsyncPacketSocket* socket,
 
   // When adapter enumeration is disabled and binding to the any address, the
   // default local address will be issued as a candidate instead if
-  // |emit_local_for_anyaddress| is true. This is to allow connectivity for
+  // `emit_local_for_anyaddress` is true. This is to allow connectivity for
   // applications which absolutely requires a HOST candidate.
   rtc::SocketAddress addr = address;
 
@@ -403,7 +431,7 @@ void UDPPort::OnReadPacket(rtc::AsyncPacketSocket* socket,
   // will eat it because it might be a response to a retransmitted packet, and
   // we already cleared the request when we got the first response.
   if (server_addresses_.find(remote_addr) != server_addresses_.end()) {
-    requests_.CheckResponse(data, size);
+    request_manager_.CheckResponse(data, size);
     return;
   }
 
@@ -426,23 +454,30 @@ void UDPPort::OnReadyToSend(rtc::AsyncPacketSocket* socket) {
 void UDPPort::SendStunBindingRequests() {
   // We will keep pinging the stun server to make sure our NAT pin-hole stays
   // open until the deadline (specified in SendStunBindingRequest).
-  RTC_DCHECK(requests_.empty());
+  RTC_DCHECK(request_manager_.empty());
 
   for (ServerAddresses::const_iterator it = server_addresses_.begin();
-       it != server_addresses_.end(); ++it) {
-    SendStunBindingRequest(*it);
+       it != server_addresses_.end();) {
+    // sending a STUN binding request may cause the current SocketAddress to be
+    // erased from the set, invalidating the loop iterator before it is
+    // incremented (even if the SocketAddress itself still exists). So make a
+    // copy of the loop iterator, which may be safely invalidated.
+    ServerAddresses::const_iterator addr = it++;
+    SendStunBindingRequest(*addr);
   }
 }
 
 void UDPPort::ResolveStunAddress(const rtc::SocketAddress& stun_addr) {
   if (!resolver_) {
-    resolver_.reset(new AddressResolver(socket_factory()));
-    resolver_->SignalDone.connect(this, &UDPPort::OnResolveResult);
+    resolver_.reset(new AddressResolver(
+        socket_factory(), [&](const rtc::SocketAddress& input, int error) {
+          OnResolveResult(input, error);
+        }));
   }
 
   RTC_LOG(LS_INFO) << ToString() << ": Starting STUN host lookup for "
                    << stun_addr.ToSensitiveString();
-  resolver_->Resolve(stun_addr);
+  resolver_->Resolve(stun_addr, Network()->family(), field_trials());
 }
 
 void UDPPort::OnResolveResult(const rtc::SocketAddress& input, int error) {
@@ -472,9 +507,9 @@ void UDPPort::SendStunBindingRequest(const rtc::SocketAddress& stun_addr) {
     ResolveStunAddress(stun_addr);
 
   } else if (socket_->GetState() == rtc::AsyncPacketSocket::STATE_BOUND) {
-    // Check if |server_addr_| is compatible with the port's ip.
+    // Check if `server_addr_` is compatible with the port's ip.
     if (IsCompatibleAddress(stun_addr)) {
-      requests_.Send(
+      request_manager_.Send(
           new StunBindingRequest(this, stun_addr, rtc::TimeMillis()));
     } else {
       // Since we can't send stun messages to the server, we should mark this
@@ -518,7 +553,7 @@ void UDPPort::OnStunBindingRequestSucceeded(
     return;
   }
   bind_request_succeeded_servers_.insert(stun_server_addr);
-  // If socket is shared and |stun_reflected_addr| is equal to local socket
+  // If socket is shared and `stun_reflected_addr` is equal to local socket
   // address, or if the same address has been added by another STUN server,
   // then discarding the stun address.
   // For STUN, related address is the local socket address.
@@ -532,7 +567,7 @@ void UDPPort::OnStunBindingRequestSucceeded(
     }
 
     rtc::StringBuilder url;
-    url << "stun:" << stun_server_addr.ipaddr().ToString() << ":"
+    url << "stun:" << stun_server_addr.hostname() << ":"
         << stun_server_addr.port();
     AddAddress(stun_reflected_addr, socket_->GetLocalAddress(), related_address,
                UDP_PROTOCOL_NAME, "", "", STUN_PORT_TYPE,
@@ -544,7 +579,7 @@ void UDPPort::OnStunBindingRequestSucceeded(
 void UDPPort::OnStunBindingOrResolveRequestFailed(
     const rtc::SocketAddress& stun_server_addr,
     int error_code,
-    const std::string& reason) {
+    absl::string_view reason) {
   rtc::StringBuilder url;
   url << "stun:" << stun_server_addr.ToString();
   SignalCandidateError(
@@ -597,7 +632,11 @@ void UDPPort::OnSendPacket(const void* data, size_t size, StunRequest* req) {
   options.info_signaled_after_sent.packet_type = rtc::PacketType::kStunMessage;
   CopyPortInformationToPacketInfo(&options.info_signaled_after_sent);
   if (socket_->SendTo(data, size, sreq->server_addr(), options) < 0) {
-    RTC_LOG_ERR_EX(LERROR, socket_->GetError()) << "sendto";
+    RTC_LOG_ERR_EX(LS_ERROR, socket_->GetError())
+        << "UDP send of " << size << " bytes to host "
+        << sreq->server_addr().ToSensitiveString() << " ("
+        << sreq->server_addr().ToResolvedSensitiveString()
+        << ") failed with error " << error_;
   }
   stats_.stun_binding_requests_sent++;
 }
@@ -615,18 +654,18 @@ bool UDPPort::HasCandidateWithAddress(const rtc::SocketAddress& addr) const {
 std::unique_ptr<StunPort> StunPort::Create(
     rtc::Thread* thread,
     rtc::PacketSocketFactory* factory,
-    rtc::Network* network,
+    const rtc::Network* network,
     uint16_t min_port,
     uint16_t max_port,
-    const std::string& username,
-    const std::string& password,
+    absl::string_view username,
+    absl::string_view password,
     const ServerAddresses& servers,
-    const std::string& origin,
-    absl::optional<int> stun_keepalive_interval) {
+    absl::optional<int> stun_keepalive_interval,
+    const webrtc::FieldTrialsView* field_trials) {
   // Using `new` to access a non-public constructor.
   auto port = absl::WrapUnique(new StunPort(thread, factory, network, min_port,
                                             max_port, username, password,
-                                            servers, origin));
+                                            servers, field_trials));
   port->set_stun_keepalive_delay(stun_keepalive_interval);
   if (!port->Init()) {
     return nullptr;
@@ -636,13 +675,13 @@ std::unique_ptr<StunPort> StunPort::Create(
 
 StunPort::StunPort(rtc::Thread* thread,
                    rtc::PacketSocketFactory* factory,
-                   rtc::Network* network,
+                   const rtc::Network* network,
                    uint16_t min_port,
                    uint16_t max_port,
-                   const std::string& username,
-                   const std::string& password,
+                   absl::string_view username,
+                   absl::string_view password,
                    const ServerAddresses& servers,
-                   const std::string& origin)
+                   const webrtc::FieldTrialsView* field_trials)
     : UDPPort(thread,
               factory,
               network,
@@ -650,8 +689,8 @@ StunPort::StunPort(rtc::Thread* thread,
               max_port,
               username,
               password,
-              origin,
-              false) {
+              false,
+              field_trials) {
   // UDPPort will set these to local udp, updating these to STUN.
   set_type(STUN_PORT_TYPE);
   set_server_addresses(servers);

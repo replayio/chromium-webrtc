@@ -20,20 +20,37 @@ rtc_library("agc") {
   configs += [ "..:apm_debug_dump" ]
   deps = [
     ":gain_control_interface",
-    ":gain_map",
     ":level_estimation",
+    "..:api",
     "..:apm_logging",
     "..:audio_buffer",
+    "..:audio_frame_view",
+    "../../../api:array_view",
     "../../../common_audio",
     "../../../common_audio:common_audio_c",
     "../../../rtc_base:checks",
     "../../../rtc_base:gtest_prod",
     "../../../rtc_base:logging",
-    "../../../rtc_base:rtc_base_approved",
     "../../../rtc_base:safe_minmax",
     "../../../system_wrappers:field_trial",
     "../../../system_wrappers:metrics",
+    "../agc2:clipping_predictor",
+    "../agc2:gain_map",
     "../vad",
+  ]
+  absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
+}
+
+rtc_library("analog_gain_stats_reporter") {
+  sources = [
+    "analog_gain_stats_reporter.cc",
+    "analog_gain_stats_reporter.h",
+  ]
+  deps = [
+    "../../../rtc_base:gtest_prod",
+    "../../../rtc_base:logging",
+    "../../../rtc_base:safe_minmax",
+    "../../../system_wrappers:metrics",
   ]
   absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
 }
@@ -48,6 +65,7 @@ rtc_library("level_estimation") {
     "utility.h",
   ]
   deps = [
+    "../../../api:array_view",
     "../../../rtc_base:checks",
     "../vad",
   ]
@@ -74,7 +92,6 @@ rtc_library("legacy_agc") {
     "../../../common_audio:common_audio_c",
     "../../../common_audio/third_party/ooura:fft_size_256",
     "../../../rtc_base:checks",
-    "../../../rtc_base:rtc_base_approved",
     "../../../system_wrappers",
   ]
 
@@ -87,15 +104,12 @@ rtc_library("legacy_agc") {
   }
 }
 
-rtc_source_set("gain_map") {
-  sources = [ "gain_map_internal.h" ]
-}
-
 if (rtc_include_tests) {
   rtc_library("agc_unittests") {
     testonly = true
     sources = [
       "agc_manager_direct_unittest.cc",
+      "analog_gain_stats_reporter_unittest.cc",
       "loudness_histogram_unittest.cc",
       "mock_agc.h",
     ]
@@ -103,13 +117,25 @@ if (rtc_include_tests) {
 
     deps = [
       ":agc",
+      ":analog_gain_stats_reporter",
       ":gain_control_interface",
       ":level_estimation",
       "..:mocks",
+      "../../../api:array_view",
+      "../../../rtc_base:checks",
+      "../../../rtc_base:random",
+      "../../../rtc_base:safe_conversions",
+      "../../../rtc_base:safe_minmax",
+      "../../../rtc_base:stringutils",
+      "../../../system_wrappers:metrics",
       "../../../test:field_trial",
       "../../../test:fileutils",
       "../../../test:test_support",
       "//testing/gtest",
+    ]
+    absl_deps = [
+      "//third_party/abseil-cpp/absl/strings",
+      "//third_party/abseil-cpp/absl/types:optional",
     ]
   }
 }

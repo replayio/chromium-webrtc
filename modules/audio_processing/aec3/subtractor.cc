@@ -91,7 +91,20 @@ Subtractor::Subtractor(const EchoCanceller3Config& config,
           std::vector<float>(GetTimeDomainLength(std::max(
                                  config_.filter.refined_initial.length_blocks,
                                  config_.filter.refined.length_blocks)),
-                             0.f)) {
+                             0.f)),
+      coarse_impulse_responses_(0) {
+  // Set up the storing of coarse impulse responses if data dumping is
+  // available.
+  if (ApmDataDumper::IsAvailable()) {
+    coarse_impulse_responses_.resize(num_capture_channels_);
+    const size_t filter_size = GetTimeDomainLength(
+        std::max(config_.filter.coarse_initial.length_blocks,
+                 config_.filter.coarse.length_blocks));
+    for (std::vector<float>& impulse_response : coarse_impulse_responses_) {
+      impulse_response.resize(filter_size, 0.f);
+    }
+  }
+
   for (size_t ch = 0; ch < num_capture_channels_; ++ch) {
     refined_filters_[ch] = std::make_unique<AdaptiveFirFilter>(
         config_.filter.refined.length_blocks,
@@ -163,11 +176,11 @@ void Subtractor::ExitInitialState() {
 }
 
 void Subtractor::Process(const RenderBuffer& render_buffer,
-                         const std::vector<std::vector<float>>& capture,
+                         const Block& capture,
                          const RenderSignalAnalyzer& render_signal_analyzer,
                          const AecState& aec_state,
                          rtc::ArrayView<SubtractorOutput> outputs) {
-  RTC_DCHECK_EQ(num_capture_channels_, capture.size());
+  RTC_DCHECK_EQ(num_capture_channels_, capture.NumChannels());
 
   // Compute the render powers.
   const bool same_filter_sizes = refined_filters_[0]->SizePartitions() ==
@@ -191,9 +204,8 @@ void Subtractor::Process(const RenderBuffer& render_buffer,
 
   // Process all capture channels
   for (size_t ch = 0; ch < num_capture_channels_; ++ch) {
-    RTC_DCHECK_EQ(kBlockSize, capture[ch].size());
     SubtractorOutput& output = outputs[ch];
-    rtc::ArrayView<const float> y = capture[ch];
+    rtc::ArrayView<const float> y = capture.View(/*band=*/0, ch);
     FftData& E_refined = output.E_refined;
     FftData E_coarse;
     std::array<float, kBlockSize>& e_refined = output.e_refined;
@@ -285,7 +297,14 @@ void Subtractor::Process(const RenderBuffer& render_buffer,
           config_.filter.coarse_reset_hangover_blocks;
     }
 
-    coarse_filter_[ch]->Adapt(render_buffer, G);
+    if (ApmDataDumper::IsAvailable()) {
+      RTC_DCHECK_LT(ch, coarse_impulse_responses_.size());
+      coarse_filter_[ch]->Adapt(render_buffer, G,
+                                &coarse_impulse_responses_[ch]);
+    } else {
+      coarse_filter_[ch]->Adapt(render_buffer, G);
+    }
+
     if (ch == 0) {
       data_dumper_->DumpRaw("aec3_subtractor_G_coarse", G.re);
       data_dumper_->DumpRaw("aec3_subtractor_G_coarse", G.im);

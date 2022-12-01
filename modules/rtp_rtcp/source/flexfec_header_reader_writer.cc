@@ -25,6 +25,11 @@ namespace {
 // Maximum number of media packets that can be protected in one batch.
 constexpr size_t kMaxMediaPackets = 48;  // Since we are reusing ULPFEC masks.
 
+// Maximum number of media packets tracked by FEC decoder.
+// Maintain a sufficiently larger tracking window than `kMaxMediaPackets`
+// to account for packet reordering in pacer/ network.
+constexpr size_t kMaxTrackedMediaPackets = 4 * kMaxMediaPackets;
+
 // Maximum number of FEC packets stored inside ForwardErrorCorrection.
 constexpr size_t kMaxFecPackets = kMaxMediaPackets;
 
@@ -72,7 +77,7 @@ size_t FlexfecHeaderSize(size_t packet_mask_size) {
 }  // namespace
 
 FlexfecHeaderReader::FlexfecHeaderReader()
-    : FecHeaderReader(kMaxMediaPackets, kMaxFecPackets) {}
+    : FecHeaderReader(kMaxTrackedMediaPackets, kMaxFecPackets) {}
 
 FlexfecHeaderReader::~FlexfecHeaderReader() = default;
 
@@ -228,7 +233,8 @@ size_t FlexfecHeaderWriter::MinPacketMaskSize(const uint8_t* packet_mask,
     // We must expand it with zeros.
     return kFlexfecPacketMaskSizes[2];
   }
-  RTC_NOTREACHED() << "Incorrect packet mask size: " << packet_mask_size << ".";
+  RTC_DCHECK_NOTREACHED() << "Incorrect packet mask size: " << packet_mask_size
+                          << ".";
   return kFlexfecPacketMaskSizes[2];
 }
 
@@ -306,8 +312,8 @@ void FlexfecHeaderWriter::FinalizeFecHeader(
       written_packet_mask[2] |= 0x40;          // Set bit 15.
     }
   } else {
-    RTC_NOTREACHED() << "Incorrect packet mask size: " << packet_mask_size
-                     << ".";
+    RTC_DCHECK_NOTREACHED()
+        << "Incorrect packet mask size: " << packet_mask_size << ".";
   }
 }
 

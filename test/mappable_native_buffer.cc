@@ -45,21 +45,22 @@ VideoFrame CreateMappableNativeFrame(int64_t ntp_time_ms,
                                      VideoFrameBuffer::Type mappable_type,
                                      int width,
                                      int height) {
-  VideoFrame frame = VideoFrame::Builder()
-                         .set_video_frame_buffer(
-                             new rtc::RefCountedObject<MappableNativeBuffer>(
-                                 mappable_type, width, height))
-                         .set_timestamp_rtp(99)
-                         .set_timestamp_ms(99)
-                         .set_rotation(kVideoRotation_0)
-                         .build();
+  VideoFrame frame =
+      VideoFrame::Builder()
+          .set_video_frame_buffer(rtc::make_ref_counted<MappableNativeBuffer>(
+              mappable_type, width, height))
+          .set_timestamp_rtp(99)
+          .set_timestamp_ms(99)
+          .set_rotation(kVideoRotation_0)
+          .build();
   frame.set_ntp_time_ms(ntp_time_ms);
   return frame;
 }
 
 rtc::scoped_refptr<MappableNativeBuffer> GetMappableNativeBufferFromVideoFrame(
     const VideoFrame& frame) {
-  return static_cast<MappableNativeBuffer*>(frame.video_frame_buffer().get());
+  return rtc::scoped_refptr<MappableNativeBuffer>(
+      static_cast<MappableNativeBuffer*>(frame.video_frame_buffer().get()));
 }
 
 MappableNativeBuffer::ScaledBuffer::ScaledBuffer(
@@ -77,9 +78,8 @@ MappableNativeBuffer::ScaledBuffer::CropAndScale(int offset_x,
                                                  int crop_height,
                                                  int scaled_width,
                                                  int scaled_height) {
-  return rtc::scoped_refptr<VideoFrameBuffer>(
-      new rtc::RefCountedObject<ScaledBuffer>(parent_, scaled_width,
-                                              scaled_height));
+  return rtc::make_ref_counted<ScaledBuffer>(parent_, scaled_width,
+                                             scaled_height);
 }
 
 rtc::scoped_refptr<I420BufferInterface>
@@ -146,8 +146,8 @@ bool MappableNativeBuffer::DidConvertToI420() const {
 
 rtc::scoped_refptr<MappableNativeBuffer::ScaledBuffer>
 MappableNativeBuffer::FullSizeBuffer() {
-  return rtc::scoped_refptr<MappableNativeBuffer::ScaledBuffer>(
-      new rtc::RefCountedObject<ScaledBuffer>(this, width_, height_));
+  return rtc::make_ref_counted<ScaledBuffer>(
+      rtc::scoped_refptr<MappableNativeBuffer>(this), width_, height_);
 }
 
 rtc::scoped_refptr<VideoFrameBuffer>
@@ -163,20 +163,19 @@ MappableNativeBuffer::GetOrCreateMappedBuffer(int width, int height) {
     case VideoFrameBuffer::Type::kI420: {
       rtc::scoped_refptr<I420Buffer> i420_buffer =
           I420Buffer::Create(width, height);
-      I420Buffer::SetBlack(i420_buffer);
+      I420Buffer::SetBlack(i420_buffer.get());
       mapped_buffer = i420_buffer;
       break;
     }
     case VideoFrameBuffer::Type::kNV12: {
-      rtc::scoped_refptr<NV12Buffer> nv12_buffer;
-      nv12_buffer = new rtc::RefCountedObject<NV12BufferWithDidConvertToI420>(
-          width, height);
+      auto nv12_buffer =
+          rtc::make_ref_counted<NV12BufferWithDidConvertToI420>(width, height);
       nv12_buffer->InitializeData();
-      mapped_buffer = nv12_buffer;
+      mapped_buffer = std::move(nv12_buffer);
       break;
     }
     default:
-      RTC_NOTREACHED();
+      RTC_DCHECK_NOTREACHED();
   }
   mapped_buffers_.push_back(mapped_buffer);
   return mapped_buffer;

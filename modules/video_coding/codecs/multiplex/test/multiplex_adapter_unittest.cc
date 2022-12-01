@@ -38,7 +38,6 @@
 #include "modules/video_coding/codecs/vp9/include/vp9.h"
 #include "modules/video_coding/include/video_codec_interface.h"
 #include "modules/video_coding/include/video_error_codes.h"
-#include "rtc_base/ref_counted_object.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 #include "test/video_codec_settings.h"
@@ -90,9 +89,9 @@ class TestMultiplexAdapter : public VideoCodecUnitTest,
     for (int i = 0; i < 16; i++) {
       data[i] = i;
     }
-    rtc::scoped_refptr<AugmentedVideoFrameBuffer> augmented_video_frame_buffer =
-        new rtc::RefCountedObject<AugmentedVideoFrameBuffer>(
-            video_buffer, std::move(data), 16);
+    auto augmented_video_frame_buffer =
+        rtc::make_ref_counted<AugmentedVideoFrameBuffer>(video_buffer,
+                                                         std::move(data), 16);
     return std::make_unique<VideoFrame>(
         VideoFrame::Builder()
             .set_video_frame_buffer(augmented_video_frame_buffer)
@@ -201,7 +200,7 @@ class TestMultiplexAdapter : public VideoCodecUnitTest,
 };
 
 // TODO(emircan): Currently VideoCodecUnitTest tests do a complete setup
-// step that goes beyond constructing |decoder_|. Simplify these tests to do
+// step that goes beyond constructing `decoder_`. Simplify these tests to do
 // less.
 TEST_P(TestMultiplexAdapter, ConstructAndDestructDecoder) {
   EXPECT_EQ(WEBRTC_VIDEO_CODEC_OK, decoder_->Release());

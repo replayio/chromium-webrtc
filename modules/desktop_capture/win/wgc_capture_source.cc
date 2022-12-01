@@ -10,7 +10,10 @@
 
 #include "modules/desktop_capture/win/wgc_capture_source.h"
 
+#include <dwmapi.h>
 #include <windows.graphics.capture.interop.h>
+#include <windows.h>
+
 #include <utility>
 
 #include "modules/desktop_capture/win/screen_capture_utils.h"
@@ -25,6 +28,30 @@ namespace webrtc {
 WgcCaptureSource::WgcCaptureSource(DesktopCapturer::SourceId source_id)
     : source_id_(source_id) {}
 WgcCaptureSource::~WgcCaptureSource() = default;
+
+bool WgcCaptureSource::IsCapturable() {
+  // If we can create a capture item, then we can capture it. Unfortunately,
+  // we can't cache this item because it may be created in a different COM
+  // apartment than where capture will eventually start from.
+  ComPtr<WGC::IGraphicsCaptureItem> item;
+  return SUCCEEDED(CreateCaptureItem(&item));
+}
+
+bool WgcCaptureSource::FocusOnSource() {
+  return false;
+}
+
+ABI::Windows::Graphics::SizeInt32 WgcCaptureSource::GetSize() {
+  if (!item_)
+    return {0, 0};
+
+  ABI::Windows::Graphics::SizeInt32 item_size;
+  HRESULT hr = item_->get_Size(&item_size);
+  if (FAILED(hr))
+    return {0, 0};
+
+  return item_size;
+}
 
 HRESULT WgcCaptureSource::GetCaptureItem(
     ComPtr<WGC::IGraphicsCaptureItem>* result) {
@@ -58,8 +85,39 @@ WgcWindowSource::WgcWindowSource(DesktopCapturer::SourceId source_id)
     : WgcCaptureSource(source_id) {}
 WgcWindowSource::~WgcWindowSource() = default;
 
+DesktopVector WgcWindowSource::GetTopLeft() {
+  DesktopRect window_rect;
+  if (!GetWindowRect(reinterpret_cast<HWND>(GetSourceId()), &window_rect))
+    return DesktopVector();
+
+  return window_rect.top_left();
+}
+
+ABI::Windows::Graphics::SizeInt32 WgcWindowSource::GetSize() {
+  RECT window_rect;
+  HRESULT hr = ::DwmGetWindowAttribute(
+      reinterpret_cast<HWND>(GetSourceId()), DWMWA_EXTENDED_FRAME_BOUNDS,
+      reinterpret_cast<void*>(&window_rect), sizeof(window_rect));
+  if (FAILED(hr))
+    return WgcCaptureSource::GetSize();
+
+  return {window_rect.right - window_rect.left,
+          window_rect.bottom - window_rect.top};
+}
+
 bool WgcWindowSource::IsCapturable() {
-  return IsWindowValidAndVisible(reinterpret_cast<HWND>(GetSourceId()));
+  if (!IsWindowValidAndVisible(reinterpret_cast<HWND>(GetSourceId())))
+    return false;
+
+  return WgcCaptureSource::IsCapturable();
+}
+
+bool WgcWindowSource::FocusOnSource() {
+  if (!IsWindowValidAndVisible(reinterpret_cast<HWND>(GetSourceId())))
+    return false;
+
+  return ::BringWindowToTop(reinterpret_cast<HWND>(GetSourceId())) &&
+         ::SetForegroundWindow(reinterpret_cast<HWND>(GetSourceId()));
 }
 
 HRESULT WgcWindowSource::CreateCaptureItem(
@@ -88,19 +146,47 @@ HRESULT WgcWindowSource::CreateCaptureItem(
 }
 
 WgcScreenSource::WgcScreenSource(DesktopCapturer::SourceId source_id)
-    : WgcCaptureSource(source_id) {}
+    : WgcCaptureSource(source_id) {
+  // Getting the HMONITOR could fail if the source_id is invalid. In that case,
+  // we leave hmonitor_ uninitialized and `IsCapturable()` will fail.
+  HMONITOR hmon;
+  if (GetHmonitorFromDeviceIndex(GetSourceId(), &hmon))
+    hmonitor_ = hmon;
+}
+
 WgcScreenSource::~WgcScreenSource() = default;
 
-bool WgcScreenSource::IsCapturable() {
-  // 0 is the id used to capture all display monitors, so it is valid.
-  if (GetSourceId() == 0)
-    return true;
+DesktopVector WgcScreenSource::GetTopLeft() {
+  if (!hmonitor_)
+    return DesktopVector();
 
-  return IsMonitorValid(GetSourceId());
+  return GetMonitorRect(*hmonitor_).top_left();
+}
+
+ABI::Windows::Graphics::SizeInt32 WgcScreenSource::GetSize() {
+  ABI::Windows::Graphics::SizeInt32 size = WgcCaptureSource::GetSize();
+  if (!hmonitor_ || (size.Width != 0 && size.Height != 0))
+    return size;
+
+  DesktopRect rect = GetMonitorRect(*hmonitor_);
+  return {rect.width(), rect.height()};
+}
+
+bool WgcScreenSource::IsCapturable() {
+  if (!hmonitor_)
+    return false;
+
+  if (!IsMonitorValid(*hmonitor_))
+    return false;
+
+  return WgcCaptureSource::IsCapturable();
 }
 
 HRESULT WgcScreenSource::CreateCaptureItem(
     ComPtr<WGC::IGraphicsCaptureItem>* result) {
+  if (!hmonitor_)
+    return E_ABORT;
+
   if (!ResolveCoreWinRTDelayload())
     return E_FAIL;
 
@@ -111,9 +197,14 @@ HRESULT WgcScreenSource::CreateCaptureItem(
   if (FAILED(hr))
     return hr;
 
+  // Ensure the monitor is still valid (hasn't disconnected) before trying to
+  // create the item. On versions of Windows before Win11, `CreateForMonitor`
+  // will crash if no displays are connected.
+  if (!IsMonitorValid(hmonitor_.value()))
+    return E_ABORT;
+
   ComPtr<WGC::IGraphicsCaptureItem> item;
-  hr = interop->CreateForMonitor(reinterpret_cast<HMONITOR>(GetSourceId()),
-                                 IID_PPV_ARGS(&item));
+  hr = interop->CreateForMonitor(*hmonitor_, IID_PPV_ARGS(&item));
   if (FAILED(hr))
     return hr;
 

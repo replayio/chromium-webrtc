@@ -23,7 +23,6 @@
 #include "rtc_base/synchronization/mutex.h"
 
 namespace webrtc {
-namespace webrtc_pc_e2e {
 
 // This class is an example implementation of
 // webrtc::VideoQualityAnalyzerInterface and calculates simple metrics
@@ -45,7 +44,8 @@ class ExampleVideoQualityAnalyzer : public VideoQualityAnalyzerInterface {
   void OnFrameEncoded(absl::string_view peer_name,
                       uint16_t frame_id,
                       const EncodedImage& encoded_image,
-                      const EncoderStats& stats) override;
+                      const EncoderStats& stats,
+                      bool discarded) override;
   void OnFrameDropped(absl::string_view peer_name,
                       EncodedImageCallback::DropReason reason) override;
   void OnFramePreDecode(absl::string_view peer_name,
@@ -61,7 +61,8 @@ class ExampleVideoQualityAnalyzer : public VideoQualityAnalyzerInterface {
                       int32_t error_code) override;
   void OnDecoderError(absl::string_view peer_name,
                       uint16_t frame_id,
-                      int32_t error_code) override;
+                      int32_t error_code,
+                      const DecoderStats& stats) override;
   void Stop() override;
   std::string GetStreamLabel(uint16_t frame_id) override;
 
@@ -95,7 +96,6 @@ class ExampleVideoQualityAnalyzer : public VideoQualityAnalyzerInterface {
   uint64_t frames_dropped_ RTC_GUARDED_BY(lock_) = 0;
 };
 
-}  // namespace webrtc_pc_e2e
 }  // namespace webrtc
 
 #endif  // TEST_PC_E2E_ANALYZER_VIDEO_EXAMPLE_VIDEO_QUALITY_ANALYZER_H_

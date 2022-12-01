@@ -10,7 +10,6 @@
 
 #include "sdk/android/native_api/video/video_source.h"
 
-#include "rtc_base/ref_counted_object.h"
 #include "sdk/android/src/jni/android_video_track_source.h"
 #include "sdk/android/src/jni/native_capturer_observer.h"
 
@@ -29,7 +28,7 @@ class JavaVideoTrackSourceImpl : public JavaVideoTrackSourceInterface {
                            bool is_screencast,
                            bool align_timestamps)
       : android_video_track_source_(
-            new rtc::RefCountedObject<jni::AndroidVideoTrackSource>(
+            rtc::make_ref_counted<jni::AndroidVideoTrackSource>(
                 signaling_thread,
                 env,
                 is_screencast,
@@ -109,7 +108,7 @@ rtc::scoped_refptr<JavaVideoTrackSourceInterface> CreateJavaVideoSource(
     rtc::Thread* signaling_thread,
     bool is_screencast,
     bool align_timestamps) {
-  return new rtc::RefCountedObject<JavaVideoTrackSourceImpl>(
+  return rtc::make_ref_counted<JavaVideoTrackSourceImpl>(
       jni, signaling_thread, is_screencast, align_timestamps);
 }
 

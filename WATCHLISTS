@@ -73,9 +73,6 @@
     'video_coding': {
       'filepath': 'modules/video_coding/.*',
     },
-    'video_processing': {
-      'filepath': 'modules/video_processing/.*',
-    },
     'bitrate_controller': {
       'filepath': 'modules/bitrate_controller/.*'
     },
@@ -96,6 +93,9 @@
     },
     'pc': {
       'filepath': '^pc/.*',
+    },
+    'logging' : {
+      'filepath': 'logging/.*',
     },
   },
 
@@ -150,7 +150,6 @@
     'audio_processing': ['alessiob@webrtc.org',
                          'aluebs@webrtc.org',
                          'audio-team@agora.io',
-                         'fhernqvist@webrtc.org',
                          'henrik.lundin@webrtc.org',
                          'minyue@webrtc.org',
                          'peah@webrtc.org',
@@ -159,19 +158,14 @@
                      'stefan@webrtc.org',
                      'video-team@agora.io',
                      'zhengzhonghou@agora.io'],
-    'video_processing': ['stefan@webrtc.org',
-                         'video-team@agora.io',
-                         'zhengzhonghou@agora.io'],
     'bitrate_controller': ['mflodman@webrtc.org',
                            'stefan@webrtc.org',
-                           'srte@webrtc.org',
                            'zhuangzesen@agora.io'],
-    'congestion_controller': ['srte@webrtc.org'],
+    'congestion_controller': [],
     'remote_bitrate_estimator': ['mflodman@webrtc.org',
                                  'stefan@webrtc.org',
                                  'zhuangzesen@agora.io'],
     'pacing': ['mflodman@webrtc.org',
-               'srte@webrtc.org',
                'stefan@webrtc.org',
                'zhuangzesen@agora.io'],
     'rtp_rtcp': ['mflodman@webrtc.org',
@@ -184,5 +178,6 @@
                         'peah@webrtc.org',
                         'zhengzhonghou@agora.io'],
     'pc': ['steveanton+watch@webrtc.org'],
+    'logging': ['terelius@webrtc.org'],
   },
 }

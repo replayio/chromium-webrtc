@@ -29,6 +29,11 @@ namespace webrtc {
 
 DesktopCapturer::~DesktopCapturer() = default;
 
+DelegatedSourceListController*
+DesktopCapturer::GetDelegatedSourceListController() {
+  return nullptr;
+}
+
 void DesktopCapturer::SetSharedMemoryFactory(
     std::unique_ptr<SharedMemoryFactory> shared_memory_factory) {}
 
@@ -54,10 +59,7 @@ bool DesktopCapturer::IsOccluded(const DesktopVector& pos) {
 std::unique_ptr<DesktopCapturer> DesktopCapturer::CreateWindowCapturer(
     const DesktopCaptureOptions& options) {
 #if defined(RTC_ENABLE_WIN_WGC)
-  // TODO(bugs.webrtc.org/11760): Add a WebRTC field trial (or similar
-  // mechanism) check here that leads to use of the WGC capturer once it is
-  // fully implemented.
-  if (rtc::rtc_win::GetVersion() >= rtc::rtc_win::Version::VERSION_WIN10_RS5) {
+  if (options.allow_wgc_capturer() && IsWgcSupported(CaptureType::kWindow)) {
     return WgcCapturerWin::CreateRawWindowCapturer(options);
   }
 #endif  // defined(RTC_ENABLE_WIN_WGC)
@@ -80,10 +82,7 @@ std::unique_ptr<DesktopCapturer> DesktopCapturer::CreateWindowCapturer(
 std::unique_ptr<DesktopCapturer> DesktopCapturer::CreateScreenCapturer(
     const DesktopCaptureOptions& options) {
 #if defined(RTC_ENABLE_WIN_WGC)
-  // TODO(bugs.webrtc.org/11760): Add a WebRTC field trial (or similar
-  // mechanism) check here that leads to use of the WGC capturer once it is
-  // fully implemented.
-  if (rtc::rtc_win::GetVersion() >= rtc::rtc_win::Version::VERSION_WIN10_RS5) {
+  if (options.allow_wgc_capturer() && IsWgcSupported(CaptureType::kScreen)) {
     return WgcCapturerWin::CreateRawScreenCapturer(options);
   }
 #endif  // defined(RTC_ENABLE_WIN_WGC)

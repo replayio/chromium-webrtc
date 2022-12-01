@@ -32,7 +32,6 @@
 #include "modules/video_coding/codecs/interface/common_constants.h"
 #include "modules/video_coding/include/video_error_codes.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/task_utils/to_queued_task.h"
 #include "rtc_base/time_utils.h"
 #include "test/gtest.h"
 #include "third_party/libyuv/include/libyuv/compare.h"
@@ -196,10 +195,12 @@ VideoProcessor::VideoProcessor(webrtc::VideoEncoder* encoder,
   for (size_t i = 0; i < num_simulcast_or_spatial_layers_; ++i) {
     decode_callback_.push_back(
         std::make_unique<VideoProcessorDecodeCompleteCallback>(this, i));
-    RTC_CHECK_EQ(
-        decoders_->at(i)->InitDecode(&config_.codec_settings,
-                                     static_cast<int>(config_.NumberOfCores())),
-        WEBRTC_VIDEO_CODEC_OK);
+    VideoDecoder::Settings decoder_settings;
+    decoder_settings.set_max_render_resolution(
+        {config_.codec_settings.width, config_.codec_settings.height});
+    decoder_settings.set_codec_type(config_.codec_settings.codecType);
+    decoder_settings.set_number_of_cores(config_.NumberOfCores());
+    RTC_CHECK(decoders_->at(i)->Configure(decoder_settings));
     RTC_CHECK_EQ(decoders_->at(i)->RegisterDecodeCompleteCallback(
                      decode_callback_.at(i).get()),
                  WEBRTC_VIDEO_CODEC_OK);
@@ -338,9 +339,9 @@ int32_t VideoProcessor::VideoProcessorDecodeCompleteCallback::Decoded(
                           .build();
     copy.set_timestamp(image.timestamp());
 
-    task_queue_->PostTask(ToQueuedTask([this, copy]() {
+    task_queue_->PostTask([this, copy]() {
       video_processor_->FrameDecoded(copy, simulcast_svc_idx_);
-    }));
+    });
     return 0;
   }
   video_processor_->FrameDecoded(image, simulcast_svc_idx_);
@@ -505,7 +506,7 @@ void VideoProcessor::WriteDecodedFrame(const I420BufferInterface& decoded_frame,
     scaled_buffer = I420Buffer::Create(input_video_width, input_video_height);
     scaled_buffer->ScaleFrom(decoded_frame);
 
-    scaled_frame = scaled_buffer;
+    scaled_frame = scaled_buffer.get();
   }
 
   // Ensure there is no padding.
@@ -591,7 +592,7 @@ void VideoProcessor::FrameDecoded(const VideoFrame& decoded_frame,
 
   // Erase all buffered input frames that we have moved past for all
   // simulcast/spatial layers. Never buffer more than
-  // |kMaxBufferedInputFrames| frames, to protect against long runs of
+  // `kMaxBufferedInputFrames` frames, to protect against long runs of
   // consecutive frame drops for a particular layer.
   const auto min_last_decoded_frame_num = std::min_element(
       last_decoded_frame_num_.cbegin(), last_decoded_frame_num_.cend());
@@ -650,6 +651,8 @@ const webrtc::EncodedImage* VideoProcessor::BuildAndStoreSuperframe(
 
   EncodedImage copied_image = encoded_image;
   copied_image.SetEncodedData(buffer);
+  if (base_image.size())
+    copied_image._frameType = base_image._frameType;
 
   // Replace previous EncodedImage for this spatial layer.
   merged_encoded_frames_.at(spatial_idx) = std::move(copied_image);

@@ -11,7 +11,6 @@
 #include "sdk/android/src/jni/encoded_image.h"
 
 #include "api/video/encoded_image.h"
-#include "rtc_base/ref_counted_object.h"
 #include "rtc_base/time_utils.h"
 #include "sdk/android/generated_video_jni/EncodedImage_jni.h"
 #include "sdk/android/native_api/jni/java_types.h"
@@ -90,7 +89,7 @@ EncodedImage JavaToNativeEncodedImage(JNIEnv* env,
   const size_t buffer_size = env->GetDirectBufferCapacity(j_buffer.obj());
 
   EncodedImage frame;
-  frame.SetEncodedData(new rtc::RefCountedObject<JavaEncodedImageBuffer>(
+  frame.SetEncodedData(rtc::make_ref_counted<JavaEncodedImageBuffer>(
       env, j_encoded_image, buffer, buffer_size));
 
   frame._encodedWidth = Java_EncodedImage_getEncodedWidth(env, j_encoded_image);

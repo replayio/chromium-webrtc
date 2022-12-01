@@ -43,6 +43,7 @@ struct RTC_EXPORT EchoCanceller3Config {
     size_t hysteresis_limit_blocks = 1;
     size_t fixed_capture_delay_samples = 0;
     float delay_estimate_smoothing = 0.7f;
+    float delay_estimate_smoothing_delay_found = 0.7f;
     float delay_candidate_detection_threshold = 0.2f;
     struct DelaySelectionThresholds {
       int initial;
@@ -58,6 +59,7 @@ struct RTC_EXPORT EchoCanceller3Config {
     };
     AlignmentMixing render_alignment_mixing = {false, true, 10000.f, true};
     AlignmentMixing capture_alignment_mixing = {false, true, 10000.f, false};
+    bool detect_pre_echo = false;
   } delay;
 
   struct Filter {
@@ -107,8 +109,11 @@ struct RTC_EXPORT EchoCanceller3Config {
   struct EpStrength {
     float default_gain = 1.f;
     float default_len = 0.83f;
+    float nearend_len = 0.83f;
     bool echo_can_saturate = true;
     bool bounded_erl = false;
+    bool erle_onset_compensation_in_dominant_nearend = false;
+    bool use_conservative_tail_frequency_response = true;
   } ep_strength;
 
   struct EchoAudibility {
@@ -192,6 +197,12 @@ struct RTC_EXPORT EchoCanceller3Config {
                                    2.0f,
                                    0.25f);
 
+    bool lf_smoothing_during_initial_phase = true;
+    int last_permanent_lf_smoothing_band = 0;
+    int last_lf_smoothing_band = 5;
+    int last_lf_band = 5;
+    int first_hf_band = 8;
+
     struct DominantNearendDetection {
       float enr_threshold = .25f;
       float enr_exit_threshold = 10.f;
@@ -199,6 +210,7 @@ struct RTC_EXPORT EchoCanceller3Config {
       int hold_duration = 50;
       int trigger_threshold = 12;
       bool use_during_initial_phase = true;
+      bool use_unbounded_echo_spectrum = true;
     } dominant_nearend_detection;
 
     struct SubbandNearendDetection {
@@ -225,6 +237,13 @@ struct RTC_EXPORT EchoCanceller3Config {
     float floor_first_increase = 0.00001f;
     bool conservative_hf_suppression = false;
   } suppressor;
+
+  struct MultiChannel {
+    bool detect_stereo_content = true;
+    float stereo_detection_threshold = 0.0f;
+    int stereo_detection_timeout_threshold_seconds = 300;
+    float stereo_detection_hysteresis_seconds = 2.0f;
+  } multi_channel;
 };
 }  // namespace webrtc
 
