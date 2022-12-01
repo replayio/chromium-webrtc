@@ -25,13 +25,8 @@
 #include "absl/strings/string_view.h"
 #include "api/async_dns_resolver.h"
 #include "api/candidate.h"
-<<<<<<< HEAD
-#include "base/record_replay.h"
-||||||| eca855197a
-=======
 #include "api/field_trials_view.h"
 #include "api/units/time_delta.h"
->>>>>>> fb3bd4a01d7c840dfe7b3efa144c0fbcb6a97fef
 #include "logging/rtc_event_log/ice_logger.h"
 #include "p2p/base/basic_async_resolver_factory.h"
 #include "p2p/base/basic_ice_controller.h"
@@ -52,6 +47,8 @@
 #include "rtc_base/time_utils.h"
 #include "rtc_base/trace_event.h"
 #include "system_wrappers/include/metrics.h"
+
+#include "base/record_replay.h"
 
 namespace {
 

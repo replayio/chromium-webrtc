@@ -17,14 +17,11 @@
 #include <limits>
 #include <memory>
 
-<<<<<<< HEAD
-#include "base/record_replay.h"
-||||||| eca855197a
-=======
 #include "absl/strings/string_view.h"
->>>>>>> fb3bd4a01d7c840dfe7b3efa144c0fbcb6a97fef
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
+
+#include "base/record_replay.h"
 
 // Protect against max macro inclusion.
 #undef max

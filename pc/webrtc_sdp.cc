@@ -1722,14 +1722,7 @@ void BuildRtpContentAttributes(const MediaContentDescription* media_desc,
   // RFC 4566
   // a=rtpmap:<payload type> <encoding name>/<clock rate>
   // [/<encodingparameters>]
-<<<<<<< HEAD
-  BuildRtpMap(media_desc, media_type, message);
-  recordreplay::Assert("BuildRtpContentAttributes #10 %lu", message->length());
-||||||| eca855197a
-  BuildRtpMap(media_desc, media_type, message);
-=======
   BuildRtpmap(media_desc, media_type, message);
->>>>>>> fb3bd4a01d7c840dfe7b3efa144c0fbcb6a97fef
 
   for (const StreamParams& track : media_desc->streams()) {
     // Build the ssrc-group lines.

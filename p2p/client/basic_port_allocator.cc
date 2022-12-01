@@ -19,16 +19,11 @@
 #include <vector>
 
 #include "absl/algorithm/container.h"
-<<<<<<< HEAD
-#include "base/record_replay.h"
-||||||| eca855197a
-=======
 #include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
 #include "api/task_queue/pending_task_safety_flag.h"
 #include "api/transport/field_trial_based_config.h"
 #include "api/units/time_delta.h"
->>>>>>> fb3bd4a01d7c840dfe7b3efa144c0fbcb6a97fef
 #include "p2p/base/basic_packet_socket_factory.h"
 #include "p2p/base/port.h"
 #include "p2p/base/stun_port.h"
@@ -43,6 +38,8 @@
 #include "rtc_base/strings/string_builder.h"
 #include "rtc_base/trace_event.h"
 #include "system_wrappers/include/metrics.h"
+
+#include "base/record_replay.h"
 
 namespace cricket {
 namespace {

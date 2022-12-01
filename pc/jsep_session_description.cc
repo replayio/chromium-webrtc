@@ -13,13 +13,8 @@
 #include <memory>
 #include <utility>
 
-<<<<<<< HEAD
-#include "base/record_replay.h"
-||||||| eca855197a
-=======
 #include "absl/types/optional.h"
 #include "p2p/base/p2p_constants.h"
->>>>>>> fb3bd4a01d7c840dfe7b3efa144c0fbcb6a97fef
 #include "p2p/base/port.h"
 #include "p2p/base/transport_description.h"
 #include "p2p/base/transport_info.h"
@@ -30,6 +25,8 @@
 #include "rtc_base/logging.h"
 #include "rtc_base/net_helper.h"
 #include "rtc_base/socket_address.h"
+
+#include "base/record_replay.h"
 
 using cricket::SessionDescription;
 

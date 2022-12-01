@@ -20,12 +20,7 @@
 #include "absl/algorithm/container.h"
 #include "absl/memory/memory.h"
 #include "absl/strings/match.h"
-<<<<<<< HEAD
-#include "base/record_replay.h"
-||||||| eca855197a
-=======
 #include "absl/strings/string_view.h"
->>>>>>> fb3bd4a01d7c840dfe7b3efa144c0fbcb6a97fef
 #include "p2p/base/connection.h"
 #include "p2p/base/port_allocator.h"
 #include "rtc_base/checks.h"
@@ -41,6 +36,8 @@
 #include "rtc_base/strings/string_builder.h"
 #include "rtc_base/third_party/base64/base64.h"
 #include "rtc_base/trace_event.h"
+
+#include "base/record_replay.h"
 
 namespace cricket {
 namespace {

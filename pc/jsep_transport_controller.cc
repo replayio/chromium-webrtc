@@ -1176,14 +1176,7 @@ void JsepTransportController::OnTransportCandidateGathered_n(
 
   // We should never signal peer-reflexive candidates.
   if (candidate.type() == cricket::PRFLX_PORT_TYPE) {
-<<<<<<< HEAD
-    RTC_NOTREACHED();
-    recordreplay::Assert("JsepTransportController::OnTransportCandidateGathered #1");
-||||||| eca855197a
-    RTC_NOTREACHED();
-=======
     RTC_DCHECK_NOTREACHED();
->>>>>>> fb3bd4a01d7c840dfe7b3efa144c0fbcb6a97fef
     return;
   }
 

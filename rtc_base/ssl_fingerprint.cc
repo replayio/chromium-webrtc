@@ -17,19 +17,16 @@
 #include <string>
 
 #include "absl/algorithm/container.h"
-<<<<<<< HEAD
-#include "base/record_replay.h"
-||||||| eca855197a
-=======
 #include "absl/strings/string_view.h"
 #include "api/array_view.h"
->>>>>>> fb3bd4a01d7c840dfe7b3efa144c0fbcb6a97fef
 #include "rtc_base/logging.h"
 #include "rtc_base/message_digest.h"
 #include "rtc_base/rtc_certificate.h"
 #include "rtc_base/ssl_certificate.h"
 #include "rtc_base/ssl_identity.h"
 #include "rtc_base/string_encode.h"
+
+#include "base/record_replay.h"
 
 namespace rtc {
 
@@ -122,17 +119,8 @@ bool SSLFingerprint::operator==(const SSLFingerprint& other) const {
 }
 
 std::string SSLFingerprint::GetRfc4572Fingerprint() const {
-<<<<<<< HEAD
-  std::string fingerprint =
-      rtc::hex_encode_with_delimiter(digest.data<char>(), digest.size(), ':');
-  recordreplay::Assert("SSLFingerprint::GetRfc4572Fingerprint %s", fingerprint.c_str());
-||||||| eca855197a
-  std::string fingerprint =
-      rtc::hex_encode_with_delimiter(digest.data<char>(), digest.size(), ':');
-=======
   std::string fingerprint = rtc::hex_encode_with_delimiter(
       absl::string_view(digest.data<char>(), digest.size()), ':');
->>>>>>> fb3bd4a01d7c840dfe7b3efa144c0fbcb6a97fef
   absl::c_transform(fingerprint, fingerprint.begin(), ::toupper);
   return fingerprint;
 }

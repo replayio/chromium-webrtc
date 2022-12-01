@@ -23,13 +23,8 @@
 #include "api/jsep.h"
 #include "api/jsep_session_description.h"
 #include "api/rtc_error.h"
-<<<<<<< HEAD
-#include "base/record_replay.h"
-||||||| eca855197a
-=======
 #include "api/sequence_checker.h"
 #include "pc/connection_context.h"
->>>>>>> fb3bd4a01d7c840dfe7b3efa144c0fbcb6a97fef
 #include "pc/sdp_state_provider.h"
 #include "pc/session_description.h"
 #include "rtc_base/checks.h"
@@ -38,6 +33,8 @@
 #include "rtc_base/ssl_stream_adapter.h"
 #include "rtc_base/string_encode.h"
 #include "rtc_base/unique_id_generator.h"
+
+#include "base/record_replay.h"
 
 using cricket::MediaSessionOptions;
 using rtc::UniqueRandomIdGenerator;

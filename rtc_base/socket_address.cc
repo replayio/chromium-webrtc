@@ -10,12 +10,7 @@
 
 #include "rtc_base/socket_address.h"
 
-<<<<<<< HEAD
-#include "base/record_replay.h"
-||||||| eca855197a
-=======
 #include "absl/strings/string_view.h"
->>>>>>> fb3bd4a01d7c840dfe7b3efa144c0fbcb6a97fef
 #include "rtc_base/numerics/safe_conversions.h"
 
 #if defined(WEBRTC_POSIX)
@@ -42,6 +37,8 @@
 #if defined(WEBRTC_WIN)
 #include "rtc_base/win32.h"
 #endif
+
+#include "base/record_replay.h"
 
 namespace rtc {
 
