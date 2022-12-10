@@ -46,7 +46,14 @@ class SecureRandomGenerator : public RandomGenerator {
     // Avoid calling RAND_bytes when recording/replaying as it can behave in
     // non-deterministic ways.
     if (recordreplay::IsRecordingOrReplaying()) {
+#ifdef WEBRTC_LINUX
       return getrandom(buf, len, 0) == (ssize_t)len;
+#elif defined(WEBRTC_MAC)
+      arc4random_buf(buf, len);
+      return true;
+#else
+      #error "Unknown platform"
+#endif
     }
     return (RAND_bytes(reinterpret_cast<unsigned char*>(buf), len) > 0);
   }
