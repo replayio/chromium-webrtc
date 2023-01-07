@@ -22,7 +22,6 @@
 #include "api/scoped_refptr.h"
 #include "modules/audio_mixer/frame_combiner.h"
 #include "modules/audio_mixer/output_rate_calculator.h"
-#include "rtc_base/constructor_magic.h"
 #include "rtc_base/race_checker.h"
 #include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/thread_annotations.h"
@@ -35,15 +34,21 @@ class AudioMixerImpl : public AudioMixer {
 
   // AudioProcessing only accepts 10 ms frames.
   static const int kFrameDurationInMs = 10;
-  enum : int { kMaximumAmountOfMixedAudioSources = 3 };
 
-  static rtc::scoped_refptr<AudioMixerImpl> Create();
+  static const int kDefaultNumberOfMixedAudioSources = 3;
+
+  static rtc::scoped_refptr<AudioMixerImpl> Create(
+      int max_sources_to_mix = kDefaultNumberOfMixedAudioSources);
 
   static rtc::scoped_refptr<AudioMixerImpl> Create(
       std::unique_ptr<OutputRateCalculator> output_rate_calculator,
-      bool use_limiter);
+      bool use_limiter,
+      int max_sources_to_mix = kDefaultNumberOfMixedAudioSources);
 
   ~AudioMixerImpl() override;
+
+  AudioMixerImpl(const AudioMixerImpl&) = delete;
+  AudioMixerImpl& operator=(const AudioMixerImpl&) = delete;
 
   // AudioMixer functions
   bool AddSource(Source* audio_source) override;
@@ -60,7 +65,8 @@ class AudioMixerImpl : public AudioMixer {
 
  protected:
   AudioMixerImpl(std::unique_ptr<OutputRateCalculator> output_rate_calculator,
-                 bool use_limiter);
+                 bool use_limiter,
+                 int max_sources_to_mix);
 
  private:
   struct HelperContainers;
@@ -76,6 +82,8 @@ class AudioMixerImpl : public AudioMixer {
   // checks that mixing is done sequentially.
   mutable Mutex mutex_;
 
+  const int max_sources_to_mix_;
+
   std::unique_ptr<OutputRateCalculator> output_rate_calculator_;
 
   // List of all audio sources.
@@ -86,8 +94,6 @@ class AudioMixerImpl : public AudioMixer {
 
   // Component that handles actual adding of audio frames.
   FrameCombiner frame_combiner_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(AudioMixerImpl);
 };
 }  // namespace webrtc
 

@@ -26,7 +26,11 @@ void InitTestSuite(int (*test_suite)(void),
                    int argc,
                    char* argv[],
                    bool save_chartjson_result,
+                   bool export_perf_results_new_api,
                    absl::optional<std::vector<std::string>> metrics_to_plot);
+
+// Returns true if unittests should be run by the XCTest runnner.
+bool ShouldRunIOSUnittestsWithXCTest();
 
 }  // namespace test
 }  // namespace rtc

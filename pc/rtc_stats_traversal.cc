@@ -25,8 +25,8 @@ namespace {
 void TraverseAndTakeVisitedStats(RTCStatsReport* report,
                                  RTCStatsReport* visited_report,
                                  const std::string& current_id) {
-  // Mark current stats object as visited by moving it |report| to
-  // |visited_report|.
+  // Mark current stats object as visited by moving it `report` to
+  // `visited_report`.
   std::unique_ptr<const RTCStats> current = report->Take(current_id);
   if (!current) {
     // This node has already been visited (or it is an invalid id).
@@ -62,7 +62,7 @@ rtc::scoped_refptr<RTCStatsReport> TakeReferencedStats(
     rtc::scoped_refptr<RTCStatsReport> report,
     const std::vector<std::string>& ids) {
   rtc::scoped_refptr<RTCStatsReport> result =
-      RTCStatsReport::Create(report->timestamp_us());
+      RTCStatsReport::Create(report->timestamp());
   for (const auto& id : ids) {
     TraverseAndTakeVisitedStats(report.get(), result.get(), id);
   }
@@ -140,7 +140,7 @@ std::vector<const std::string*> GetStatsReferencedIds(const RTCStats& stats) {
     AddIdIfDefined(transport.local_certificate_id, &neighbor_ids);
     AddIdIfDefined(transport.remote_certificate_id, &neighbor_ids);
   } else {
-    RTC_NOTREACHED() << "Unrecognized type: " << type;
+    RTC_DCHECK_NOTREACHED() << "Unrecognized type: " << type;
   }
   return neighbor_ids;
 }

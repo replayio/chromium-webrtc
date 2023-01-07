@@ -13,8 +13,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "rtc_base/ref_counted_object.h"
-
 namespace webrtc {
 
 EncodedImageBuffer::EncodedImageBuffer(size_t size) : size_(size) {
@@ -32,13 +30,13 @@ EncodedImageBuffer::~EncodedImageBuffer() {
 
 // static
 rtc::scoped_refptr<EncodedImageBuffer> EncodedImageBuffer::Create(size_t size) {
-  return new rtc::RefCountedObject<EncodedImageBuffer>(size);
+  return rtc::make_ref_counted<EncodedImageBuffer>(size);
 }
 // static
 rtc::scoped_refptr<EncodedImageBuffer> EncodedImageBuffer::Create(
     const uint8_t* data,
     size_t size) {
-  return new rtc::RefCountedObject<EncodedImageBuffer>(data, size);
+  return rtc::make_ref_counted<EncodedImageBuffer>(data, size);
 }
 
 const uint8_t* EncodedImageBuffer::data() const {

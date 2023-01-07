@@ -17,9 +17,11 @@
 #include <limits>
 #include <memory>
 
-#include "base/record_replay.h"
+#include "absl/strings/string_view.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
+
+#include "base/record_replay.h"
 
 // Protect against max macro inclusion.
 #undef max
@@ -44,7 +46,14 @@ class SecureRandomGenerator : public RandomGenerator {
     // Avoid calling RAND_bytes when recording/replaying as it can behave in
     // non-deterministic ways.
     if (recordreplay::IsRecordingOrReplaying()) {
+#ifdef WEBRTC_LINUX
       return getrandom(buf, len, 0) == (ssize_t)len;
+#elif defined(WEBRTC_MAC)
+      arc4random_buf(buf, len);
+      return true;
+#else
+      #error "Unknown platform"
+#endif
     }
     return (RAND_bytes(reinterpret_cast<unsigned char*>(buf), len) > 0);
   }
@@ -152,10 +161,8 @@ bool CreateRandomString(size_t len, std::string* str) {
   return CreateRandomString(len, kBase64, 64, str);
 }
 
-bool CreateRandomString(size_t len,
-                        const std::string& table,
-                        std::string* str) {
-  return CreateRandomString(len, table.c_str(), static_cast<int>(table.size()),
+bool CreateRandomString(size_t len, absl::string_view table, std::string* str) {
+  return CreateRandomString(len, table.data(), static_cast<int>(table.size()),
                             str);
 }
 

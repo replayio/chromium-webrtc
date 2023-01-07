@@ -13,8 +13,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <memory>
-#include <string>
 #include <utility>
 #include <vector>
 
@@ -29,6 +27,7 @@
 #include "pc/session_description.h"
 #include "pc/webrtc_sdp.h"
 #include "rtc_base/helpers.h"
+#include "rtc_base/net_helper.h"
 #include "rtc_base/socket_address.h"
 #include "rtc_base/string_encode.h"
 #include "test/gtest.h"
@@ -127,6 +126,12 @@ TEST_F(JsepSessionDescriptionTest, CloneDefault) {
   EXPECT_EQ(old_desc_string, new_desc_string);
   EXPECT_EQ(jsep_desc_->session_id(), new_desc->session_id());
   EXPECT_EQ(jsep_desc_->session_version(), new_desc->session_version());
+}
+
+TEST_F(JsepSessionDescriptionTest, CloneRollback) {
+  auto jsep_desc = std::make_unique<JsepSessionDescription>(SdpType::kRollback);
+  auto new_desc = jsep_desc->Clone();
+  EXPECT_EQ(jsep_desc->type(), new_desc->type());
 }
 
 TEST_F(JsepSessionDescriptionTest, CloneWithCandidates) {

@@ -15,13 +15,14 @@
 #include <stdint.h>
 
 #include <algorithm>
-#include <iosfwd>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "absl/memory/memory.h"
+#include "absl/strings/string_view.h"
 #include "api/crypto_params.h"
 #include "api/media_types.h"
 #include "api/rtp_parameters.h"
@@ -44,23 +45,14 @@ namespace cricket {
 
 typedef std::vector<AudioCodec> AudioCodecs;
 typedef std::vector<VideoCodec> VideoCodecs;
-typedef std::vector<RtpDataCodec> RtpDataCodecs;
 typedef std::vector<CryptoParams> CryptoParamsVec;
 typedef std::vector<webrtc::RtpExtension> RtpHeaderExtensions;
-
-// RTC4585 RTP/AVPF
-extern const char kMediaProtocolAvpf[];
-// RFC5124 RTP/SAVPF
-extern const char kMediaProtocolSavpf[];
-
-extern const char kMediaProtocolDtlsSavpf[];
 
 // Options to control how session descriptions are generated.
 const int kAutoBandwidth = -1;
 
 class AudioContentDescription;
 class VideoContentDescription;
-class RtpDataContentDescription;
 class SctpDataContentDescription;
 class UnsupportedContentDescription;
 
@@ -83,11 +75,6 @@ class MediaContentDescription {
   virtual VideoContentDescription* as_video() { return nullptr; }
   virtual const VideoContentDescription* as_video() const { return nullptr; }
 
-  virtual RtpDataContentDescription* as_rtp_data() { return nullptr; }
-  virtual const RtpDataContentDescription* as_rtp_data() const {
-    return nullptr;
-  }
-
   virtual SctpDataContentDescription* as_sctp() { return nullptr; }
   virtual const SctpDataContentDescription* as_sctp() const { return nullptr; }
 
@@ -106,11 +93,11 @@ class MediaContentDescription {
     return absl::WrapUnique(CloneInternal());
   }
 
-  // |protocol| is the expected media transport protocol, such as RTP/AVPF,
+  // `protocol` is the expected media transport protocol, such as RTP/AVPF,
   // RTP/SAVPF or SCTP/DTLS.
   virtual std::string protocol() const { return protocol_; }
-  virtual void set_protocol(const std::string& protocol) {
-    protocol_ = protocol;
+  virtual void set_protocol(absl::string_view protocol) {
+    protocol_ = std::string(protocol);
   }
 
   virtual webrtc::RtpTransceiverDirection direction() const {
@@ -150,6 +137,11 @@ class MediaContentDescription {
     cryptos_ = cryptos;
   }
 
+  // List of RTP header extensions. URIs are **NOT** guaranteed to be unique
+  // as they can appear twice when both encrypted and non-encrypted extensions
+  // are present.
+  // Use RtpExtension::FindHeaderExtensionByUri for finding and
+  // RtpExtension::DeduplicateHeaderExtensions for filtering.
   virtual const RtpHeaderExtensions& rtp_header_extensions() const {
     return rtp_header_extensions_;
   }
@@ -191,14 +183,6 @@ class MediaContentDescription {
     AddStream(sp);
   }
 
-  // Sets the CNAME of all StreamParams if it have not been set.
-  virtual void SetCnameIfEmpty(const std::string& cname) {
-    for (cricket::StreamParamsVec::iterator it = send_streams_.begin();
-         it != send_streams_.end(); ++it) {
-      if (it->cname.empty())
-        it->cname = cname;
-    }
-  }
   virtual uint32_t first_ssrc() const {
     if (send_streams_.empty()) {
       return 0;
@@ -291,9 +275,9 @@ class MediaContentDescription {
 template <class C>
 class MediaContentDescriptionImpl : public MediaContentDescription {
  public:
-  void set_protocol(const std::string& protocol) override {
+  void set_protocol(absl::string_view protocol) override {
     RTC_DCHECK(IsRtpProtocol(protocol));
-    protocol_ = protocol;
+    protocol_ = std::string(protocol);
   }
 
   typedef C CodecType;
@@ -361,20 +345,6 @@ class VideoContentDescription : public MediaContentDescriptionImpl<VideoCodec> {
   }
 };
 
-class RtpDataContentDescription
-    : public MediaContentDescriptionImpl<RtpDataCodec> {
- public:
-  RtpDataContentDescription() {}
-  MediaType type() const override { return MEDIA_TYPE_DATA; }
-  RtpDataContentDescription* as_rtp_data() override { return this; }
-  const RtpDataContentDescription* as_rtp_data() const override { return this; }
-
- private:
-  RtpDataContentDescription* CloneInternal() const override {
-    return new RtpDataContentDescription(*this);
-  }
-};
-
 class SctpDataContentDescription : public MediaContentDescription {
  public:
   SctpDataContentDescription() {}
@@ -388,9 +358,9 @@ class SctpDataContentDescription : public MediaContentDescription {
   const SctpDataContentDescription* as_sctp() const override { return this; }
 
   bool has_codecs() const override { return false; }
-  void set_protocol(const std::string& protocol) override {
+  void set_protocol(absl::string_view protocol) override {
     RTC_DCHECK(IsSctpProtocol(protocol));
-    protocol_ = protocol;
+    protocol_ = std::string(protocol);
   }
 
   bool use_sctpmap() const { return use_sctpmap_; }
@@ -415,7 +385,7 @@ class SctpDataContentDescription : public MediaContentDescription {
 
 class UnsupportedContentDescription : public MediaContentDescription {
  public:
-  explicit UnsupportedContentDescription(const std::string& media_type)
+  explicit UnsupportedContentDescription(absl::string_view media_type)
       : media_type_(media_type) {}
   MediaType type() const override { return MEDIA_TYPE_UNSUPPORTED; }
 
@@ -459,11 +429,11 @@ class RTC_EXPORT ContentInfo {
   ContentInfo(ContentInfo&& o) = default;
   ContentInfo& operator=(ContentInfo&& o) = default;
 
-  // Alias for |name|.
+  // Alias for `name`.
   std::string mid() const { return name; }
   void set_mid(const std::string& mid) { this->name = mid; }
 
-  // Alias for |description|.
+  // Alias for `description`.
   MediaContentDescription* media_description();
   const MediaContentDescription* media_description() const;
 
@@ -486,7 +456,7 @@ typedef std::vector<std::string> ContentNames;
 
 // This class provides a mechanism to aggregate different media contents into a
 // group. This group can also be shared with the peers in a pre-defined format.
-// GroupInfo should be populated only with the |content_name| of the
+// GroupInfo should be populated only with the `content_name` of the
 // MediaDescription.
 class ContentGroup {
  public:
@@ -501,9 +471,11 @@ class ContentGroup {
   const ContentNames& content_names() const { return content_names_; }
 
   const std::string* FirstContentName() const;
-  bool HasContentName(const std::string& content_name) const;
-  void AddContentName(const std::string& content_name);
-  bool RemoveContentName(const std::string& content_name);
+  bool HasContentName(absl::string_view content_name) const;
+  void AddContentName(absl::string_view content_name);
+  bool RemoveContentName(absl::string_view content_name);
+  // for debugging
+  std::string ToString() const;
 
  private:
   std::string semantics_;
@@ -588,11 +560,13 @@ class SessionDescription {
   // Group accessors.
   const ContentGroups& groups() const { return content_groups_; }
   const ContentGroup* GetGroupByName(const std::string& name) const;
+  std::vector<const ContentGroup*> GetGroupsByName(
+      const std::string& name) const;
   bool HasGroup(const std::string& name) const;
 
   // Group mutators.
   void AddGroup(const ContentGroup& group) { content_groups_.push_back(group); }
-  // Remove the first group with the same semantics specified by |name|.
+  // Remove the first group with the same semantics specified by `name`.
   void RemoveGroupByName(const std::string& name);
 
   // Global attributes.

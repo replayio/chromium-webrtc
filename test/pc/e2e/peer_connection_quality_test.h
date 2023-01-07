@@ -18,6 +18,7 @@
 #include "absl/strings/string_view.h"
 #include "api/task_queue/task_queue_factory.h"
 #include "api/test/audio_quality_analyzer_interface.h"
+#include "api/test/metrics/metrics_logger.h"
 #include "api/test/peerconnection_quality_test_fixture.h"
 #include "api/test/time_controller.h"
 #include "api/units/time_delta.h"
@@ -27,7 +28,6 @@
 #include "rtc_base/thread.h"
 #include "rtc_base/thread_annotations.h"
 #include "system_wrappers/include/clock.h"
-#include "test/field_trial.h"
 #include "test/pc/e2e/analyzer/video/single_process_encoded_image_data_injector.h"
 #include "test/pc/e2e/analyzer/video/video_quality_analyzer_injection_helper.h"
 #include "test/pc/e2e/analyzer_helper.h"
@@ -57,6 +57,12 @@ class PeerConnectionE2EQualityTest
       TimeController& time_controller,
       std::unique_ptr<AudioQualityAnalyzerInterface> audio_quality_analyzer,
       std::unique_ptr<VideoQualityAnalyzerInterface> video_quality_analyzer);
+  PeerConnectionE2EQualityTest(
+      std::string test_case_name,
+      TimeController& time_controller,
+      std::unique_ptr<AudioQualityAnalyzerInterface> audio_quality_analyzer,
+      std::unique_ptr<VideoQualityAnalyzerInterface> video_quality_analyzer,
+      test::MetricsLogger* metrics_logger);
 
   ~PeerConnectionE2EQualityTest() override = default;
 
@@ -69,9 +75,9 @@ class PeerConnectionE2EQualityTest
   void AddQualityMetricsReporter(std::unique_ptr<QualityMetricsReporter>
                                      quality_metrics_reporter) override;
 
-  void AddPeer(rtc::Thread* network_thread,
-               rtc::NetworkManager* network_manager,
-               rtc::FunctionView<void(PeerConfigurer*)> configurer) override;
+  PeerHandle* AddPeer(
+      const PeerNetworkDependencies& network_dependencies,
+      rtc::FunctionView<void(PeerConfigurer*)> configurer) override;
   void Run(RunParams run_params) override;
 
   TimeDelta GetRealTestDuration() const override {
@@ -81,16 +87,21 @@ class PeerConnectionE2EQualityTest
   }
 
  private:
-  // For some functionality some field trials have to be enabled, so we will
-  // enable them here.
-  void SetupRequiredFieldTrials(const RunParams& run_params);
+  class PeerHandleImpl : public PeerHandle {
+   public:
+    ~PeerHandleImpl() override = default;
+  };
+
+  // For some functionality some field trials have to be enabled, they will be
+  // enabled in Run().
+  std::string GetFieldTrials(const RunParams& run_params);
   void OnTrackCallback(absl::string_view peer_name,
                        rtc::scoped_refptr<RtpTransceiverInterface> transceiver,
                        std::vector<VideoConfig> remote_video_configs);
   // Have to be run on the signaling thread.
   void SetupCallOnSignalingThread(const RunParams& run_params);
   void TearDownCallOnSignalingThread();
-  void SetPeerCodecPreferences(TestPeer* peer, const RunParams& run_params);
+  void SetPeerCodecPreferences(TestPeer* peer);
   std::unique_ptr<SignalingInterceptor> CreateSignalingInterceptor(
       const RunParams& run_params);
   void WaitUntilIceCandidatesGathered(rtc::Thread* signaling_thread);
@@ -110,14 +121,13 @@ class PeerConnectionE2EQualityTest
   std::unique_ptr<VideoQualityAnalyzerInjectionHelper>
       video_quality_analyzer_injection_helper_;
   std::unique_ptr<MediaHelper> media_helper_;
-  std::unique_ptr<SingleProcessEncodedImageDataInjector>
-      encoded_image_id_controller_;
+  std::unique_ptr<EncodedImageDataPropagator> encoded_image_data_propagator_;
   std::unique_ptr<AudioQualityAnalyzerInterface> audio_quality_analyzer_;
   std::unique_ptr<TestActivitiesExecutor> executor_;
+  test::MetricsLogger* const metrics_logger_;
 
   std::vector<std::unique_ptr<PeerConfigurerImpl>> peer_configurations_;
-
-  std::unique_ptr<test::ScopedFieldTrials> override_field_trials_ = nullptr;
+  std::vector<PeerHandleImpl> peer_handles_;
 
   std::unique_ptr<TestPeer> alice_;
   std::unique_ptr<TestPeer> bob_;

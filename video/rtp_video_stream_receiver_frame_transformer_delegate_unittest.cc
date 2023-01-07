@@ -19,10 +19,7 @@
 #include "api/call/transport.h"
 #include "call/video_receive_stream.h"
 #include "modules/rtp_rtcp/source/rtp_descriptor_authentication.h"
-#include "modules/utility/include/process_thread.h"
 #include "rtc_base/event.h"
-#include "rtc_base/ref_counted_object.h"
-#include "rtc_base/task_utils/to_queued_task.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 #include "test/mock_frame_transformer.h"
@@ -61,10 +58,9 @@ class TestRtpVideoFrameReceiver : public RtpVideoFrameReceiver {
 TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest,
      RegisterTransformedFrameCallbackSinkOnInit) {
   TestRtpVideoFrameReceiver receiver;
-  rtc::scoped_refptr<MockFrameTransformer> frame_transformer(
-      new rtc::RefCountedObject<MockFrameTransformer>());
-  rtc::scoped_refptr<RtpVideoStreamReceiverFrameTransformerDelegate> delegate(
-      new rtc::RefCountedObject<RtpVideoStreamReceiverFrameTransformerDelegate>(
+  auto frame_transformer(rtc::make_ref_counted<MockFrameTransformer>());
+  auto delegate(
+      rtc::make_ref_counted<RtpVideoStreamReceiverFrameTransformerDelegate>(
           &receiver, frame_transformer, rtc::Thread::Current(),
           /*remote_ssrc*/ 1111));
   EXPECT_CALL(*frame_transformer,
@@ -75,10 +71,9 @@ TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest,
 TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest,
      UnregisterTransformedFrameSinkCallbackOnReset) {
   TestRtpVideoFrameReceiver receiver;
-  rtc::scoped_refptr<MockFrameTransformer> frame_transformer(
-      new rtc::RefCountedObject<MockFrameTransformer>());
-  rtc::scoped_refptr<RtpVideoStreamReceiverFrameTransformerDelegate> delegate(
-      new rtc::RefCountedObject<RtpVideoStreamReceiverFrameTransformerDelegate>(
+  auto frame_transformer(rtc::make_ref_counted<MockFrameTransformer>());
+  auto delegate(
+      rtc::make_ref_counted<RtpVideoStreamReceiverFrameTransformerDelegate>(
           &receiver, frame_transformer, rtc::Thread::Current(),
           /*remote_ssrc*/ 1111));
   EXPECT_CALL(*frame_transformer, UnregisterTransformedFrameSinkCallback(1111));
@@ -87,10 +82,10 @@ TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest,
 
 TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest, TransformFrame) {
   TestRtpVideoFrameReceiver receiver;
-  rtc::scoped_refptr<MockFrameTransformer> frame_transformer(
-      new rtc::RefCountedObject<testing::NiceMock<MockFrameTransformer>>());
-  rtc::scoped_refptr<RtpVideoStreamReceiverFrameTransformerDelegate> delegate(
-      new rtc::RefCountedObject<RtpVideoStreamReceiverFrameTransformerDelegate>(
+  auto frame_transformer(
+      rtc::make_ref_counted<testing::NiceMock<MockFrameTransformer>>());
+  auto delegate(
+      rtc::make_ref_counted<RtpVideoStreamReceiverFrameTransformerDelegate>(
           &receiver, frame_transformer, rtc::Thread::Current(),
           /*remote_ssrc*/ 1111));
   auto frame = CreateRtpFrameObject();
@@ -100,11 +95,12 @@ TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest, TransformFrame) {
 
 TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest,
      ManageFrameOnTransformedFrame) {
+  rtc::AutoThread main_thread_;
   TestRtpVideoFrameReceiver receiver;
-  rtc::scoped_refptr<MockFrameTransformer> mock_frame_transformer(
-      new rtc::RefCountedObject<NiceMock<MockFrameTransformer>>());
-  rtc::scoped_refptr<RtpVideoStreamReceiverFrameTransformerDelegate> delegate =
-      new rtc::RefCountedObject<RtpVideoStreamReceiverFrameTransformerDelegate>(
+  auto mock_frame_transformer(
+      rtc::make_ref_counted<NiceMock<MockFrameTransformer>>());
+  auto delegate =
+      rtc::make_ref_counted<RtpVideoStreamReceiverFrameTransformerDelegate>(
           &receiver, mock_frame_transformer, rtc::Thread::Current(),
           /*remote_ssrc*/ 1111);
 
@@ -127,10 +123,10 @@ TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest,
 TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest,
      TransformableFrameMetadataHasCorrectValue) {
   TestRtpVideoFrameReceiver receiver;
-  rtc::scoped_refptr<MockFrameTransformer> mock_frame_transformer =
-      new rtc::RefCountedObject<NiceMock<MockFrameTransformer>>();
-  rtc::scoped_refptr<RtpVideoStreamReceiverFrameTransformerDelegate> delegate =
-      new rtc::RefCountedObject<RtpVideoStreamReceiverFrameTransformerDelegate>(
+  auto mock_frame_transformer =
+      rtc::make_ref_counted<NiceMock<MockFrameTransformer>>();
+  auto delegate =
+      rtc::make_ref_counted<RtpVideoStreamReceiverFrameTransformerDelegate>(
           &receiver, mock_frame_transformer, rtc::Thread::Current(), 1111);
   delegate->Init();
   RTPVideoHeader video_header;

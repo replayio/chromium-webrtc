@@ -16,6 +16,8 @@
 #include <openssl/rand.h>
 #include <openssl/tls1.h>
 #include <openssl/x509v3.h>
+
+#include "absl/strings/string_view.h"
 #ifndef OPENSSL_IS_BORINGSSL
 #include <openssl/dtls1.h>
 #include <openssl/ssl.h>
@@ -40,7 +42,7 @@
 #include "rtc_base/openssl_utility.h"
 #include "rtc_base/ssl_certificate.h"
 #include "rtc_base/stream.h"
-#include "rtc_base/task_utils/to_queued_task.h"
+#include "rtc_base/string_encode.h"
 #include "rtc_base/thread.h"
 #include "rtc_base/time_utils.h"
 #include "system_wrappers/include/field_trial.h"
@@ -57,7 +59,8 @@
 
 namespace rtc {
 namespace {
-// SRTP cipher suite table. |internal_name| is used to construct a
+using ::webrtc::SafeTask;
+// SRTP cipher suite table. `internal_name` is used to construct a
 // colon-separated profile strings which is needed by
 // SSL_CTX_set_tlsext_use_srtp().
 struct SrtpCipherMapEntry {
@@ -73,10 +76,10 @@ struct SslCipherMapEntry {
 
 // This isn't elegant, but it's better than an external reference
 constexpr SrtpCipherMapEntry kSrtpCipherMap[] = {
-    {"SRTP_AES128_CM_SHA1_80", SRTP_AES128_CM_SHA1_80},
-    {"SRTP_AES128_CM_SHA1_32", SRTP_AES128_CM_SHA1_32},
-    {"SRTP_AEAD_AES_128_GCM", SRTP_AEAD_AES_128_GCM},
-    {"SRTP_AEAD_AES_256_GCM", SRTP_AEAD_AES_256_GCM}};
+    {"SRTP_AES128_CM_SHA1_80", kSrtpAes128CmSha1_80},
+    {"SRTP_AES128_CM_SHA1_32", kSrtpAes128CmSha1_32},
+    {"SRTP_AEAD_AES_128_GCM", kSrtpAeadAes128Gcm},
+    {"SRTP_AEAD_AES_256_GCM", kSrtpAeadAes256Gcm}};
 
 #ifndef OPENSSL_IS_BORINGSSL
 // The "SSL_CIPHER_standard_name" function is only available in OpenSSL when
@@ -288,7 +291,7 @@ bool ShouldAllowLegacyTLSProtocols() {
 
 OpenSSLStreamAdapter::OpenSSLStreamAdapter(
     std::unique_ptr<StreamInterface> stream)
-    : SSLStreamAdapter(std::move(stream)),
+    : stream_(std::move(stream)),
       owner_(rtc::Thread::Current()),
       state_(SSL_NONE),
       role_(SSL_CLIENT),
@@ -300,7 +303,9 @@ OpenSSLStreamAdapter::OpenSSLStreamAdapter(
       ssl_max_version_(SSL_PROTOCOL_TLS_12),
       // Default is to support legacy TLS protocols.
       // This will be changed to default non-support in M82 or M83.
-      support_legacy_tls_protocols_flag_(ShouldAllowLegacyTLSProtocols()) {}
+      support_legacy_tls_protocols_flag_(ShouldAllowLegacyTLSProtocols()) {
+  stream_->SignalEvent.connect(this, &OpenSSLStreamAdapter::OnEvent);
+}
 
 OpenSSLStreamAdapter::~OpenSSLStreamAdapter() {
   timeout_task_.Stop();
@@ -325,7 +330,7 @@ void OpenSSLStreamAdapter::SetServerRole(SSLRole role) {
 }
 
 bool OpenSSLStreamAdapter::SetPeerCertificateDigest(
-    const std::string& digest_alg,
+    absl::string_view digest_alg,
     const unsigned char* digest_val,
     size_t digest_len,
     SSLPeerCertificateDigestError* error) {
@@ -351,7 +356,7 @@ bool OpenSSLStreamAdapter::SetPeerCertificateDigest(
   }
 
   peer_certificate_digest_value_.SetData(digest_val, digest_len);
-  peer_certificate_digest_algorithm_ = digest_alg;
+  peer_certificate_digest_algorithm_ = std::string(digest_alg);
 
   if (!peer_cert_chain_) {
     // Normal case, where the digest is set before we obtain the certificate
@@ -443,15 +448,15 @@ bool OpenSSLStreamAdapter::GetSslVersionBytes(int* version) const {
 }
 
 // Key Extractor interface
-bool OpenSSLStreamAdapter::ExportKeyingMaterial(const std::string& label,
+bool OpenSSLStreamAdapter::ExportKeyingMaterial(absl::string_view label,
                                                 const uint8_t* context,
                                                 size_t context_len,
                                                 bool use_context,
                                                 uint8_t* result,
                                                 size_t result_len) {
-  if (SSL_export_keying_material(ssl_, result, result_len, label.c_str(),
-                                 label.length(), const_cast<uint8_t*>(context),
-                                 context_len, use_context) != 1) {
+  if (SSL_export_keying_material(ssl_, result, result_len, label.data(),
+                                 label.length(), context, context_len,
+                                 use_context) != 1) {
     return false;
   }
   return true;
@@ -519,7 +524,7 @@ int OpenSSLStreamAdapter::StartSSL() {
     return -1;
   }
 
-  if (StreamAdapterInterface::GetState() != SS_OPEN) {
+  if (stream_->GetState() != SS_OPEN) {
     state_ = SSL_WAIT;
     return 0;
   }
@@ -561,7 +566,7 @@ StreamResult OpenSSLStreamAdapter::Write(const void* data,
   switch (state_) {
     case SSL_NONE:
       // pass-through in clear text
-      return StreamAdapterInterface::Write(data, data_len, written, error);
+      return stream_->Write(data, data_len, written, error);
 
     case SSL_WAIT:
     case SSL_CONNECTING:
@@ -629,7 +634,7 @@ StreamResult OpenSSLStreamAdapter::Read(void* data,
   switch (state_) {
     case SSL_NONE:
       // pass-through in clear text
-      return StreamAdapterInterface::Read(data, data_len, read, error);
+      return stream_->Read(data, data_len, read, error);
     case SSL_WAIT:
     case SSL_CONNECTING:
       return SR_BLOCK;
@@ -733,7 +738,7 @@ void OpenSSLStreamAdapter::Close() {
   // When we're closed at SSL layer, also close the stream level which
   // performs necessary clean up. Otherwise, a new incoming packet after
   // this could overflow the stream buffer.
-  StreamAdapterInterface::Close();
+  stream_->Close();
 }
 
 StreamState OpenSSLStreamAdapter::GetState() const {
@@ -757,7 +762,7 @@ void OpenSSLStreamAdapter::OnEvent(StreamInterface* stream,
                                    int err) {
   int events_to_signal = 0;
   int signal_error = 0;
-  RTC_DCHECK(stream == this->stream());
+  RTC_DCHECK(stream == stream_.get());
 
   if ((events & SE_OPEN)) {
     RTC_DLOG(LS_VERBOSE) << "OpenSSLStreamAdapter::OnEvent SE_OPEN";
@@ -809,13 +814,16 @@ void OpenSSLStreamAdapter::OnEvent(StreamInterface* stream,
   }
 
   if (events_to_signal) {
-    StreamAdapterInterface::OnEvent(stream, events_to_signal, signal_error);
+    // Note that the adapter presents itself as the origin of the stream events,
+    // since users of the adapter may not recognize the adapted object.
+    SignalEvent(this, events_to_signal, signal_error);
   }
 }
 
 void OpenSSLStreamAdapter::PostEvent(int events, int err) {
-  owner_->PostTask(webrtc::ToQueuedTask(
-      task_safety_, [this, events, err]() { SignalEvent(this, events, err); }));
+  owner_->PostTask(SafeTask(task_safety_.flag(), [this, events, err]() {
+    SignalEvent(this, events, err);
+  }));
 }
 
 void OpenSSLStreamAdapter::SetTimeout(int delay_ms) {
@@ -830,10 +838,17 @@ void OpenSSLStreamAdapter::SetTimeout(int delay_ms) {
         if (flag->alive()) {
           RTC_DLOG(LS_INFO) << "DTLS timeout expired";
           timeout_task_.Stop();
-          DTLSv1_handle_timeout(ssl_);
+          int res = DTLSv1_handle_timeout(ssl_);
+          if (res > 0) {
+            RTC_LOG(LS_INFO) << "DTLS retransmission";
+          } else if (res < 0) {
+            RTC_LOG(LS_INFO) << "DTLSv1_handle_timeout() return -1";
+            Error("DTLSv1_handle_timeout", res, -1, true);
+            return webrtc::TimeDelta::PlusInfinity();
+          }
           ContinueSSL();
         } else {
-          RTC_NOTREACHED();
+          RTC_DCHECK_NOTREACHED();
         }
         // This callback will never run again (stopped above).
         return webrtc::TimeDelta::PlusInfinity();
@@ -854,7 +869,7 @@ int OpenSSLStreamAdapter::BeginSSL() {
     return -1;
   }
 
-  bio = BIO_new_stream(static_cast<StreamInterface*>(stream()));
+  bio = BIO_new_stream(stream_.get());
   if (!bio) {
     return -1;
   }
@@ -912,8 +927,7 @@ int OpenSSLStreamAdapter::ContinueSSL() {
         // The caller of ContinueSSL may be the same object listening for these
         // events and may not be prepared for reentrancy.
         // PostEvent(SE_OPEN | SE_READ | SE_WRITE, 0);
-        StreamAdapterInterface::OnEvent(stream(), SE_OPEN | SE_READ | SE_WRITE,
-                                        0);
+        SignalEvent(this, SE_OPEN | SE_READ | SE_WRITE, 0);
       }
       break;
 
@@ -946,7 +960,7 @@ int OpenSSLStreamAdapter::ContinueSSL() {
   return 0;
 }
 
-void OpenSSLStreamAdapter::Error(const char* context,
+void OpenSSLStreamAdapter::Error(absl::string_view context,
                                  int err,
                                  uint8_t alert,
                                  bool signal) {
@@ -956,7 +970,7 @@ void OpenSSLStreamAdapter::Error(const char* context,
   ssl_error_code_ = err;
   Cleanup(alert);
   if (signal) {
-    StreamAdapterInterface::OnEvent(stream(), SE_CLOSE, err);
+    SignalEvent(this, SE_CLOSE, err);
   }
 }
 
@@ -1085,9 +1099,10 @@ SSL_CTX* OpenSSLStreamAdapter::SetupSSLContext() {
   // Select list of available ciphers. Note that !SHA256 and !SHA384 only
   // remove HMAC-SHA256 and HMAC-SHA384 cipher suites, not GCM cipher suites
   // with SHA256 or SHA384 as the handshake hash.
-  // This matches the list of SSLClientSocketOpenSSL in Chromium.
+  // This matches the list of SSLClientSocketImpl in Chromium.
   SSL_CTX_set_cipher_list(
-      ctx, "DEFAULT:!NULL:!aNULL:!SHA256:!SHA384:!aECDH:!AESGCM+AES256:!aPSK");
+      ctx,
+      "DEFAULT:!NULL:!aNULL:!SHA256:!SHA384:!aECDH:!AESGCM+AES256:!aPSK:!3DES");
 
   if (!srtp_ciphers_.empty()) {
     if (SSL_CTX_set_tlsext_use_srtp(ctx, srtp_ciphers_.c_str())) {
@@ -1118,7 +1133,10 @@ bool OpenSSLStreamAdapter::VerifyPeerCertificate() {
   Buffer computed_digest(digest, digest_length);
   if (computed_digest != peer_certificate_digest_value_) {
     RTC_LOG(LS_WARNING)
-        << "Rejected peer certificate due to mismatched digest.";
+        << "Rejected peer certificate due to mismatched digest using "
+        << peer_certificate_digest_algorithm_ << ". Expected "
+        << rtc::hex_encode_with_delimiter(peer_certificate_digest_value_, ':')
+        << " got " << rtc::hex_encode_with_delimiter(computed_digest, ':');
     return false;
   }
   // Ignore any verification error if the digest matches, since there is no
@@ -1254,7 +1272,7 @@ bool OpenSSLStreamAdapter::IsAcceptableCipher(int cipher, KeyType key_type) {
   return false;
 }
 
-bool OpenSSLStreamAdapter::IsAcceptableCipher(const std::string& cipher,
+bool OpenSSLStreamAdapter::IsAcceptableCipher(absl::string_view cipher,
                                               KeyType key_type) {
   if (key_type == KT_RSA) {
     for (const cipher_list& c : OK_RSA_ciphers) {

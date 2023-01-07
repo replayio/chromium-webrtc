@@ -16,7 +16,10 @@
 #include "api/rtc_event_log/rtc_event_log.h"
 #include "api/rtc_event_log/rtc_event_log_factory.h"
 #include "api/transport/network_types.h"
+#include "call/call.h"
+#include "call/rtp_transport_controller_send_factory.h"
 #include "modules/audio_mixer/audio_mixer_impl.h"
+#include "modules/rtp_rtcp/source/rtp_util.h"
 
 namespace webrtc {
 namespace test {
@@ -56,8 +59,7 @@ Call* CreateCall(TimeController* time_controller,
                  RtcEventLog* event_log,
                  CallClientConfig config,
                  LoggingNetworkControllerFactory* network_controller_factory,
-                 rtc::scoped_refptr<AudioState> audio_state,
-                 rtc::scoped_refptr<SharedModuleThread> call_thread) {
+                 rtc::scoped_refptr<AudioState> audio_state) {
   CallConfig call_config(event_log);
   call_config.bitrate_config.max_bitrate_bps =
       config.transport.rates.max_rate.bps_or(-1);
@@ -69,9 +71,10 @@ Call* CreateCall(TimeController* time_controller,
   call_config.network_controller_factory = network_controller_factory;
   call_config.audio_state = audio_state;
   call_config.trials = config.field_trials;
-  return Call::Create(call_config, time_controller->GetClock(),
-                      std::move(call_thread),
-                      time_controller->CreateProcessThread("Pacer"));
+  Clock* clock = time_controller->GetClock();
+  return Call::Create(call_config, clock,
+                      RtpTransportControllerSendFactory().Create(
+                          call_config.ExtractTransportConfig(), clock));
 }
 
 std::unique_ptr<RtcEventLog> CreateEventLog(
@@ -213,7 +216,6 @@ CallClient::CallClient(
       clock_(time_controller->GetClock()),
       log_writer_factory_(std::move(log_writer_factory)),
       network_controller_factory_(log_writer_factory_.get(), config.transport),
-      header_parser_(RtpHeaderParser::CreateForTest()),
       task_queue_(time_controller->GetTaskQueueFactory()->CreateTaskQueue(
           "CallClient",
           TaskQueueFactory::Priority::NORMAL)) {
@@ -222,14 +224,10 @@ CallClient::CallClient(
     event_log_ = CreateEventLog(time_controller_->GetTaskQueueFactory(),
                                 log_writer_factory_.get());
     fake_audio_setup_ = InitAudio(time_controller_);
-    RTC_DCHECK(!module_thread_);
-    module_thread_ = SharedModuleThread::Create(
-        time_controller_->CreateProcessThread("CallThread"),
-        [this]() { module_thread_ = nullptr; });
 
     call_.reset(CreateCall(time_controller_, event_log_.get(), config,
                            &network_controller_factory_,
-                           fake_audio_setup_.audio_state, module_thread_));
+                           fake_audio_setup_.audio_state));
     transport_ = std::make_unique<NetworkNodeTransport>(clock_, call_.get());
   });
 }
@@ -237,7 +235,6 @@ CallClient::CallClient(
 CallClient::~CallClient() {
   SendTask([&] {
     call_.reset();
-    RTC_DCHECK(!module_thread_);  // Should be set to null in the lambda above.
     fake_audio_setup_ = {};
     rtc::Event done;
     event_log_->StopLogging([&done] { done.Set(); });
@@ -258,7 +255,7 @@ ColumnPrinter CallClient::StatsPrinter() {
 }
 
 Call::Stats CallClient::GetStats() {
-  // This call needs to be made on the thread that |call_| was constructed on.
+  // This call needs to be made on the thread that `call_` was constructed on.
   Call::Stats stats;
   SendTask([this, &stats] { stats = call_->GetStats(); });
   return stats;
@@ -293,10 +290,8 @@ void CallClient::UpdateBitrateConstraints(
 
 void CallClient::OnPacketReceived(EmulatedIpPacket packet) {
   MediaType media_type = MediaType::ANY;
-  if (!RtpHeaderParser::IsRtcp(packet.cdata(), packet.data.size())) {
-    auto ssrc = RtpHeaderParser::GetSsrc(packet.cdata(), packet.data.size());
-    RTC_CHECK(ssrc.has_value());
-    media_type = ssrc_media_types_[*ssrc];
+  if (IsRtpPacket(packet.data)) {
+    media_type = ssrc_media_types_[ParseRtpSsrc(packet.data)];
   }
   task_queue_.PostTask(
       [call = call_.get(), media_type, packet = std::move(packet)]() mutable {
@@ -338,13 +333,8 @@ uint32_t CallClient::GetNextRtxSsrc() {
   return kSendRtxSsrcs[next_rtx_ssrc_index_++];
 }
 
-void CallClient::AddExtensions(std::vector<RtpExtension> extensions) {
-  for (const auto& extension : extensions)
-    header_parser_->RegisterRtpHeaderExtension(extension);
-}
-
 void CallClient::SendTask(std::function<void()> task) {
-  task_queue_.SendTask(std::move(task), RTC_FROM_HERE);
+  task_queue_.SendTask(std::move(task));
 }
 
 int16_t CallClient::Bind(EmulatedEndpoint* endpoint) {

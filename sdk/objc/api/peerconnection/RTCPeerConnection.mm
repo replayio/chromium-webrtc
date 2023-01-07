@@ -13,6 +13,7 @@
 #import "RTCConfiguration+Private.h"
 #import "RTCDataChannel+Private.h"
 #import "RTCIceCandidate+Private.h"
+#import "RTCIceCandidateErrorEvent+Private.h"
 #import "RTCLegacyStatsReport+Private.h"
 #import "RTCMediaConstraints+Private.h"
 #import "RTCMediaStream+Private.h"
@@ -33,6 +34,7 @@
 #include "api/set_remote_description_observer_interface.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/numerics/safe_conversions.h"
+#include "sdk/objc/native/api/ssl_certificate_verifier.h"
 
 NSString *const kRTCPeerConnectionErrorDomain = @"org.webrtc.RTC_OBJC_TYPE(RTCPeerConnection)";
 int const kRTCPeerConnnectionSessionDescriptionError = -1;
@@ -226,6 +228,24 @@ void PeerConnectionDelegateAdapter::OnIceCandidate(
                    didGenerateIceCandidate:iceCandidate];
 }
 
+void PeerConnectionDelegateAdapter::OnIceCandidateError(const std::string &address,
+                                                        int port,
+                                                        const std::string &url,
+                                                        int error_code,
+                                                        const std::string &error_text) {
+  RTC_OBJC_TYPE(RTCPeerConnection) *peer_connection = peer_connection_;
+  RTC_OBJC_TYPE(RTCIceCandidateErrorEvent) *event =
+      [[RTC_OBJC_TYPE(RTCIceCandidateErrorEvent) alloc] initWithAddress:address
+                                                                   port:port
+                                                                    url:url
+                                                              errorCode:error_code
+                                                              errorText:error_text];
+  if ([peer_connection.delegate respondsToSelector:@selector(peerConnection:
+                                                             didFailToGatherIceCandidate:)]) {
+    [peer_connection.delegate peerConnection:peer_connection didFailToGatherIceCandidate:event];
+  }
+}
+
 void PeerConnectionDelegateAdapter::OnIceCandidatesRemoved(
     const std::vector<cricket::Candidate>& candidates) {
   NSMutableArray* ice_candidates =
@@ -317,10 +337,15 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
 - (nullable instancetype)initWithFactory:(RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)factory
                            configuration:(RTC_OBJC_TYPE(RTCConfiguration) *)configuration
                              constraints:(RTC_OBJC_TYPE(RTCMediaConstraints) *)constraints
+                     certificateVerifier:
+                         (nullable id<RTC_OBJC_TYPE(RTCSSLCertificateVerifier)>)certificateVerifier
                                 delegate:(id<RTC_OBJC_TYPE(RTCPeerConnectionDelegate)>)delegate {
   NSParameterAssert(factory);
   std::unique_ptr<webrtc::PeerConnectionDependencies> dependencies =
       std::make_unique<webrtc::PeerConnectionDependencies>(nullptr);
+  if (certificateVerifier != nil) {
+    dependencies->tls_cert_verifier = webrtc::ObjCToNativeCertificateVerifier(certificateVerifier);
+  }
   return [self initWithDependencies:factory
                       configuration:configuration
                         constraints:constraints
@@ -348,11 +373,12 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
 
     webrtc::PeerConnectionDependencies deps = std::move(*dependencies.release());
     deps.observer = _observer.get();
-    _peerConnection = factory.nativeFactory->CreatePeerConnection(*config, std::move(deps));
+    auto result = factory.nativeFactory->CreatePeerConnectionOrError(*config, std::move(deps));
 
-    if (!_peerConnection) {
+    if (!result.ok()) {
       return nil;
     }
+    _peerConnection = result.MoveValue();
     _factory = factory;
     _localStreams = [[NSMutableArray alloc] init];
     _delegate = delegate;
@@ -366,26 +392,22 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
 
 - (RTC_OBJC_TYPE(RTCSessionDescription) *)localDescription {
   // It's only safe to operate on SessionDescriptionInterface on the signaling thread.
-  return _peerConnection->signaling_thread()->Invoke<RTC_OBJC_TYPE(RTCSessionDescription) *>(
-      RTC_FROM_HERE, [self] {
-        const webrtc::SessionDescriptionInterface *description =
-            _peerConnection->local_description();
-        return description ?
-            [[RTC_OBJC_TYPE(RTCSessionDescription) alloc] initWithNativeDescription:description] :
-            nil;
-      });
+  return _peerConnection->signaling_thread()->BlockingCall([self] {
+    const webrtc::SessionDescriptionInterface *description = _peerConnection->local_description();
+    return description ?
+        [[RTC_OBJC_TYPE(RTCSessionDescription) alloc] initWithNativeDescription:description] :
+        nil;
+  });
 }
 
 - (RTC_OBJC_TYPE(RTCSessionDescription) *)remoteDescription {
   // It's only safe to operate on SessionDescriptionInterface on the signaling thread.
-  return _peerConnection->signaling_thread()->Invoke<RTC_OBJC_TYPE(RTCSessionDescription) *>(
-      RTC_FROM_HERE, [self] {
-        const webrtc::SessionDescriptionInterface *description =
-            _peerConnection->remote_description();
-        return description ?
-            [[RTC_OBJC_TYPE(RTCSessionDescription) alloc] initWithNativeDescription:description] :
-            nil;
-      });
+  return _peerConnection->signaling_thread()->BlockingCall([self] {
+    const webrtc::SessionDescriptionInterface *description = _peerConnection->remote_description();
+    return description ?
+        [[RTC_OBJC_TYPE(RTCSessionDescription) alloc] initWithNativeDescription:description] :
+        nil;
+  });
 }
 
 - (RTCSignalingState)signalingState {
@@ -436,20 +458,18 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
 - (void)addIceCandidate:(RTC_OBJC_TYPE(RTCIceCandidate) *)candidate
       completionHandler:(void (^)(NSError *_Nullable error))completionHandler {
   RTC_DCHECK(completionHandler != nil);
-  auto iceCandidate = webrtc::CreateIceCandidate(candidate.nativeCandidate->sdp_mid(),
-                                                 candidate.nativeCandidate->sdp_mline_index(),
-                                                 candidate.nativeCandidate->candidate());
-  _peerConnection->AddIceCandidate(std::move(iceCandidate), [completionHandler](const auto &error) {
-    if (error.ok()) {
-      completionHandler(nil);
-    } else {
-      NSString *str = [NSString stringForStdString:error.message()];
-      NSError *err = [NSError errorWithDomain:kRTCPeerConnectionErrorDomain
-                                         code:static_cast<NSInteger>(error.type())
-                                     userInfo:@{NSLocalizedDescriptionKey : str}];
-      completionHandler(err);
-    }
-  });
+  _peerConnection->AddIceCandidate(
+      candidate.nativeCandidate, [completionHandler](const auto &error) {
+        if (error.ok()) {
+          completionHandler(nil);
+        } else {
+          NSString *str = [NSString stringForStdString:error.message()];
+          NSError *err = [NSError errorWithDomain:kRTCPeerConnectionErrorDomain
+                                             code:static_cast<NSInteger>(error.type())
+                                         userInfo:@{NSLocalizedDescriptionKey : str}];
+          completionHandler(err);
+        }
+      });
 }
 - (void)removeIceCandidates:(NSArray<RTC_OBJC_TYPE(RTCIceCandidate) *> *)iceCandidates {
   std::vector<cricket::Candidate> candidates;
@@ -468,7 +488,7 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
 }
 
 - (void)addStream:(RTC_OBJC_TYPE(RTCMediaStream) *)stream {
-  if (!_peerConnection->AddStream(stream.nativeMediaStream)) {
+  if (!_peerConnection->AddStream(stream.nativeMediaStream.get())) {
     RTCLogError(@"Failed to add stream: %@", stream);
     return;
   }
@@ -476,7 +496,7 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
 }
 
 - (void)removeStream:(RTC_OBJC_TYPE(RTCMediaStream) *)stream {
-  _peerConnection->RemoveStream(stream.nativeMediaStream);
+  _peerConnection->RemoveStream(stream.nativeMediaStream.get());
   [_localStreams removeObject:stream];
 }
 
@@ -497,7 +517,7 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
 }
 
 - (BOOL)removeTrack:(RTC_OBJC_TYPE(RTCRtpSender) *)sender {
-  bool result = _peerConnection->RemoveTrack(sender.nativeRtpSender);
+  bool result = _peerConnection->RemoveTrackOrError(sender.nativeRtpSender).ok();
   if (!result) {
     RTCLogError(@"Failed to remote track %@", sender);
   }
@@ -554,49 +574,47 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
 - (void)offerForConstraints:(RTC_OBJC_TYPE(RTCMediaConstraints) *)constraints
           completionHandler:(RTCCreateSessionDescriptionCompletionHandler)completionHandler {
   RTC_DCHECK(completionHandler != nil);
-  rtc::scoped_refptr<webrtc::CreateSessionDescriptionObserverAdapter>
-      observer(new rtc::RefCountedObject
-          <webrtc::CreateSessionDescriptionObserverAdapter>(completionHandler));
+  rtc::scoped_refptr<webrtc::CreateSessionDescriptionObserverAdapter> observer =
+      rtc::make_ref_counted<webrtc::CreateSessionDescriptionObserverAdapter>(completionHandler);
   webrtc::PeerConnectionInterface::RTCOfferAnswerOptions options;
   CopyConstraintsIntoOfferAnswerOptions(constraints.nativeConstraints.get(), &options);
 
-  _peerConnection->CreateOffer(observer, options);
+  _peerConnection->CreateOffer(observer.get(), options);
 }
 
 - (void)answerForConstraints:(RTC_OBJC_TYPE(RTCMediaConstraints) *)constraints
            completionHandler:(RTCCreateSessionDescriptionCompletionHandler)completionHandler {
   RTC_DCHECK(completionHandler != nil);
-  rtc::scoped_refptr<webrtc::CreateSessionDescriptionObserverAdapter>
-      observer(new rtc::RefCountedObject
-          <webrtc::CreateSessionDescriptionObserverAdapter>(completionHandler));
+  rtc::scoped_refptr<webrtc::CreateSessionDescriptionObserverAdapter> observer =
+      rtc::make_ref_counted<webrtc::CreateSessionDescriptionObserverAdapter>(completionHandler);
   webrtc::PeerConnectionInterface::RTCOfferAnswerOptions options;
   CopyConstraintsIntoOfferAnswerOptions(constraints.nativeConstraints.get(), &options);
 
-  _peerConnection->CreateAnswer(observer, options);
+  _peerConnection->CreateAnswer(observer.get(), options);
 }
 
 - (void)setLocalDescription:(RTC_OBJC_TYPE(RTCSessionDescription) *)sdp
           completionHandler:(RTCSetSessionDescriptionCompletionHandler)completionHandler {
   RTC_DCHECK(completionHandler != nil);
-  rtc::scoped_refptr<webrtc::SetLocalDescriptionObserverInterface> observer(
-      new rtc::RefCountedObject<::SetSessionDescriptionObserver>(completionHandler));
-  _peerConnection->SetLocalDescription(sdp.nativeDescription->Clone(), observer);
+  rtc::scoped_refptr<webrtc::SetLocalDescriptionObserverInterface> observer =
+      rtc::make_ref_counted<::SetSessionDescriptionObserver>(completionHandler);
+  _peerConnection->SetLocalDescription(sdp.nativeDescription, observer);
 }
 
 - (void)setLocalDescriptionWithCompletionHandler:
     (RTCSetSessionDescriptionCompletionHandler)completionHandler {
   RTC_DCHECK(completionHandler != nil);
-  rtc::scoped_refptr<webrtc::SetLocalDescriptionObserverInterface> observer(
-      new rtc::RefCountedObject<::SetSessionDescriptionObserver>(completionHandler));
+  rtc::scoped_refptr<webrtc::SetLocalDescriptionObserverInterface> observer =
+      rtc::make_ref_counted<::SetSessionDescriptionObserver>(completionHandler);
   _peerConnection->SetLocalDescription(observer);
 }
 
 - (void)setRemoteDescription:(RTC_OBJC_TYPE(RTCSessionDescription) *)sdp
            completionHandler:(RTCSetSessionDescriptionCompletionHandler)completionHandler {
   RTC_DCHECK(completionHandler != nil);
-  rtc::scoped_refptr<webrtc::SetRemoteDescriptionObserverInterface> observer(
-      new rtc::RefCountedObject<::SetSessionDescriptionObserver>(completionHandler));
-  _peerConnection->SetRemoteDescription(sdp.nativeDescription->Clone(), observer);
+  rtc::scoped_refptr<webrtc::SetRemoteDescriptionObserverInterface> observer =
+      rtc::make_ref_counted<::SetSessionDescriptionObserver>(completionHandler);
+  _peerConnection->SetRemoteDescription(sdp.nativeDescription, observer);
 }
 
 - (BOOL)setBweMinBitrateBps:(nullable NSNumber *)minBitrateBps

@@ -14,11 +14,11 @@
 #include <utility>
 #include <vector>
 
+#include "api/task_queue/test/mock_task_queue_base.h"
 #include "call/test/mock_audio_send_stream.h"
 #include "modules/audio_device/include/mock_audio_device.h"
 #include "modules/audio_mixer/audio_mixer_impl.h"
 #include "modules/audio_processing/include/mock_audio_processing.h"
-#include "rtc_base/ref_counted_object.h"
 #include "test/gtest.h"
 
 namespace webrtc {
@@ -35,18 +35,14 @@ constexpr int kSampleRate = 16000;
 constexpr int kNumberOfChannels = 1;
 
 struct FakeAsyncAudioProcessingHelper {
-  class FakeTaskQueue : public StrictMock<TaskQueueBase> {
+  class FakeTaskQueue : public StrictMock<MockTaskQueueBase> {
    public:
     FakeTaskQueue() = default;
 
     void Delete() override { delete this; }
-    void PostTask(std::unique_ptr<QueuedTask> task) override {
-      std::move(task)->Run();
+    void PostTask(absl::AnyInvocable<void() &&> task) override {
+      std::move(task)();
     }
-    MOCK_METHOD(void,
-                PostDelayedTask,
-                (std::unique_ptr<QueuedTask> task, uint32_t milliseconds),
-                (override));
   };
 
   class FakeTaskQueueFactory : public TaskQueueFactory {
@@ -90,7 +86,7 @@ struct FakeAsyncAudioProcessingHelper {
   FakeTaskQueueFactory task_queue_factory_;
 
   rtc::scoped_refptr<AsyncAudioProcessing::Factory> CreateFactory() {
-    return new rtc::RefCountedObject<AsyncAudioProcessing::Factory>(
+    return rtc::make_ref_counted<AsyncAudioProcessing::Factory>(
         audio_frame_processor_, task_queue_factory_);
   }
 };
@@ -107,10 +103,9 @@ struct ConfigHelper {
     audio_state_config.audio_processing =
         params.use_null_audio_processing
             ? nullptr
-            : new rtc::RefCountedObject<
-                  testing::NiceMock<MockAudioProcessing>>();
+            : rtc::make_ref_counted<testing::NiceMock<MockAudioProcessing>>();
     audio_state_config.audio_device_module =
-        new rtc::RefCountedObject<NiceMock<MockAudioDeviceModule>>();
+        rtc::make_ref_counted<NiceMock<MockAudioDeviceModule>>();
     if (params.use_async_audio_processing) {
       audio_state_config.async_audio_processing_factory =
           async_audio_processing_helper_.CreateFactory();
@@ -183,7 +178,7 @@ TEST_P(AudioStateTest, Create) {
 TEST_P(AudioStateTest, ConstructDestruct) {
   ConfigHelper helper(GetParam());
   rtc::scoped_refptr<internal::AudioState> audio_state(
-      new rtc::RefCountedObject<internal::AudioState>(helper.config()));
+      rtc::make_ref_counted<internal::AudioState>(helper.config()));
 }
 
 TEST_P(AudioStateTest, RecordedAudioArrivesAtSingleStream) {
@@ -196,7 +191,7 @@ TEST_P(AudioStateTest, RecordedAudioArrivesAtSingleStream) {
   }
 
   rtc::scoped_refptr<internal::AudioState> audio_state(
-      new rtc::RefCountedObject<internal::AudioState>(helper.config()));
+      rtc::make_ref_counted<internal::AudioState>(helper.config()));
 
   MockAudioSendStream stream;
   audio_state->AddSendingStream(&stream, 8000, 2);
@@ -245,7 +240,7 @@ TEST_P(AudioStateTest, RecordedAudioArrivesAtMultipleStreams) {
   }
 
   rtc::scoped_refptr<internal::AudioState> audio_state(
-      new rtc::RefCountedObject<internal::AudioState>(helper.config()));
+      rtc::make_ref_counted<internal::AudioState>(helper.config()));
 
   MockAudioSendStream stream_1;
   MockAudioSendStream stream_2;
@@ -308,7 +303,7 @@ TEST_P(AudioStateTest, EnableChannelSwap) {
   }
 
   rtc::scoped_refptr<internal::AudioState> audio_state(
-      new rtc::RefCountedObject<internal::AudioState>(helper.config()));
+      rtc::make_ref_counted<internal::AudioState>(helper.config()));
 
   audio_state->SetStereoChannelSwapping(true);
 
