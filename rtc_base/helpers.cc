@@ -11,7 +11,6 @@
 #include "rtc_base/helpers.h"
 
 #include <openssl/rand.h>
-#include <sys/random.h>
 
 #include <cstdint>
 #include <limits>
@@ -22,6 +21,18 @@
 #include "rtc_base/logging.h"
 
 #include "base/record_replay.h"
+
+#ifndef WEBRTC_WIN
+#include <sys/random.h>
+#else
+#include <windows.h>
+// #define needed to link in RtlGenRandom(), a.k.a. SystemFunction036.  See the
+// "Community Additions" comment on MSDN here:
+// http://msdn.microsoft.com/en-us/library/windows/desktop/aa387694.aspx
+#define SystemFunction036 NTAPI SystemFunction036
+#include <NTSecAPI.h>
+#undef SystemFunction036
+#endif
 
 // Protect against max macro inclusion.
 #undef max
@@ -51,6 +62,8 @@ class SecureRandomGenerator : public RandomGenerator {
 #elif defined(WEBRTC_MAC)
       arc4random_buf(buf, len);
       return true;
+#elif defined(WEBRTC_WIN)
+      return ::RtlGenRandom(buf, len);
 #else
       #error "Unknown platform"
 #endif
