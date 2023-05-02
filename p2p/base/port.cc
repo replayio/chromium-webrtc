@@ -884,7 +884,10 @@ void Port::OnNetworkTypeChanged(const rtc::Network* network) {
 
 std::string Port::ToString() const {
   rtc::StringBuilder ss;
-  ss << "Port[" << record_replay_id_ << ":"
+  ss << "Port[" << (recordreplay::IsRecordingOrReplaying()
+      ? record_replay_id_
+      : rtc::ToHex(reinterpret_cast<uintptr_t>(this)))
+     << ":"
      << content_name_ << ":" << component_ << ":" << generation_ << ":" << type_
      << ":" << network_->ToString() << "]";
   return ss.Release();
