@@ -533,6 +533,8 @@ class Port : public PortInterface, public sigslot::has_slots<> {
 
   friend class Connection;
   webrtc::CallbackList<PortInterface*> port_destroyed_callback_list_;
+
+  int record_replay_id_ = 0;
 };
 
 }  // namespace cricket

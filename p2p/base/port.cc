@@ -134,6 +134,7 @@ Port::Port(TaskQueueBase* thread,
       weak_factory_(this),
       field_trials_(field_trials) {
   RTC_DCHECK(factory_ != NULL);
+  record_replay_id_ = recordreplay::NewIdAnyThread("Port");
   Construct();
 }
 
@@ -883,7 +884,7 @@ void Port::OnNetworkTypeChanged(const rtc::Network* network) {
 
 std::string Port::ToString() const {
   rtc::StringBuilder ss;
-  ss << "Port[" << rtc::ToHex(reinterpret_cast<uintptr_t>(this)) << ":"
+  ss << "Port[" << record_replay_id_ << ":"
      << content_name_ << ":" << component_ << ":" << generation_ << ":" << type_
      << ":" << network_->ToString() << "]";
   return ss.Release();
