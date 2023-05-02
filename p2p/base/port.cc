@@ -888,8 +888,9 @@ std::string Port::ToString() const {
          "cricket/Port address",
          reinterpret_cast<uintptr_t>(this)
        ))
-     << ":" << content_name_ << ":" << component_ << ":" << generation_ << ":"
-     << type_ << ":" << network_->ToString() << "]";
+     << ":"
+     << content_name_ << ":" << component_ << ":" << generation_ << ":" << type_
+     << ":" << network_->ToString() << "]";
   return ss.Release();
 }
 
