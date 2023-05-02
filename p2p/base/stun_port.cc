@@ -481,25 +481,18 @@ void UDPPort::ResolveStunAddress(const rtc::SocketAddress& stun_addr) {
 }
 
 void UDPPort::OnResolveResult(const rtc::SocketAddress& input, int error) {
-  recordreplay::Assert("DDBG UDPPort::OnResolveResult A %d", error);
   RTC_DCHECK(resolver_.get() != nullptr);
 
   rtc::SocketAddress resolved;
-
-  recordreplay::Assert("DDBG UDPPort::OnResolveResult B %d", error);
   if (error != 0 || !resolver_->GetResolvedAddress(
                         input, Network()->GetBestIP().family(), &resolved)) {
-    recordreplay::Assert("DDBG UDPPort::OnResolveResult C %d %s", error,
-                         ToString().c_str());
     RTC_LOG(LS_WARNING) << ToString()
                         << ": StunPort: stun host lookup received error "
                         << error;
     OnStunBindingOrResolveRequestFailed(input, SERVER_NOT_REACHABLE_ERROR,
                                         "STUN host lookup received error.");
-    recordreplay::Assert("DDBG UDPPort::OnResolveResult D %d", error);
     return;
   }
-  recordreplay::Assert("DDBG UDPPort::OnResolveResult E %d", error);
 
   server_addresses_.erase(input);
 
