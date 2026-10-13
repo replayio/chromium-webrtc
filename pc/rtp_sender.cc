@@ -465,7 +465,7 @@ LocalAudioSinkAdapter::LocalAudioSinkAdapter() : sink_(nullptr) {
   if (recordreplay::IsRecordingOrReplaying() &&
       !recordreplay::AreEventsDisallowed()) {
     record_replay_sink_ordered_lock_id_ =
-        recordreplay::CreateOrderedLock("LocalAudioSinkAdapter.sink");
+        recordreplay::CreateOrderedLock("LocalAudioSinkAdapter.lock_");
   }
 }
 
