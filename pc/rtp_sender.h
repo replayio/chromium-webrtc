@@ -302,6 +302,11 @@ class LocalAudioSinkAdapter : public AudioTrackSinkInterface,
   // Critical section protecting `sink_`.
   Mutex lock_;
   int num_preferred_channels_ = -1;
+
+  // Taken before `lock_` while recording/replaying. SetSink runs on the
+  // worker thread and OnData on the audio capture thread, and whether a
+  // buffer reaches the sink depends on which of them gets `lock_` first.
+  int record_replay_sink_ordered_lock_id_ = 0;
 };
 
 class AudioRtpSender : public DtmfProviderInterface, public RtpSenderBase {
