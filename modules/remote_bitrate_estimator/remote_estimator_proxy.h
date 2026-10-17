@@ -115,6 +115,10 @@ class RemoteEstimatorProxy {
   Timestamp last_process_time_;
 
   Mutex lock_;
+  // Taken before `lock_` while recording/replaying. OnBitrateChanged runs on
+  // the transport controller's task queue and Process on the worker thread,
+  // and the delay Process returns depends on which of them gets `lock_` first.
+  int record_replay_ordered_lock_id_ = 0;
   //  `network_state_estimator_` may be null.
   NetworkStateEstimator* const network_state_estimator_
       RTC_PT_GUARDED_BY(&lock_);

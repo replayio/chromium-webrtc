@@ -16,6 +16,7 @@
 #include <utility>
 
 #include "api/units/data_size.h"
+#include "base/record_replay.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/remote_estimate.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/transport_feedback.h"
 #include "rtc_base/checks.h"
@@ -61,6 +62,11 @@ RemoteEstimatorProxy::RemoteEstimatorProxy(
       send_periodic_feedback_(true),
       previous_abs_send_time_(0),
       abs_send_timestamp_(Timestamp::Zero()) {
+  if (recordreplay::IsRecordingOrReplaying() &&
+      !recordreplay::AreEventsDisallowed()) {
+    record_replay_ordered_lock_id_ =
+        recordreplay::CreateOrderedLock("RemoteEstimatorProxy.lock_");
+  }
   RTC_LOG(LS_INFO)
       << "Maximum interval between transport feedback RTCP messages (ms): "
       << send_config_.max_interval->ms();
@@ -101,6 +107,9 @@ void RemoteEstimatorProxy::IncomingPacket(int64_t arrival_time_ms,
 }
 
 void RemoteEstimatorProxy::IncomingPacket(Packet packet) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&lock_);
   media_ssrc_ = packet.ssrc;
   int64_t seq = 0;
@@ -151,6 +160,9 @@ void RemoteEstimatorProxy::IncomingPacket(Packet packet) {
 }
 
 TimeDelta RemoteEstimatorProxy::Process(Timestamp now) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&lock_);
   if (!send_periodic_feedback_) {
     return TimeDelta::PlusInfinity();
@@ -186,17 +198,26 @@ void RemoteEstimatorProxy::OnBitrateChanged(int bitrate_bps) {
                                 : std::max(kTwccReportSize / twcc_bitrate,
                                            send_config_.min_interval.Get());
 
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&lock_);
   send_interval_ = send_interval;
 }
 
 void RemoteEstimatorProxy::SetSendPeriodicFeedback(
     bool send_periodic_feedback) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&lock_);
   send_periodic_feedback_ = send_periodic_feedback;
 }
 
 void RemoteEstimatorProxy::SetTransportOverhead(DataSize overhead_per_packet) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&lock_);
   packet_overhead_ = overhead_per_packet;
 }
