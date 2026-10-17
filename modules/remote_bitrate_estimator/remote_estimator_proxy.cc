@@ -15,6 +15,7 @@
 #include <memory>
 #include <utility>
 
+#include "absl/types/optional.h"
 #include "api/units/data_size.h"
 #include "base/record_replay.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/remote_estimate.h"
