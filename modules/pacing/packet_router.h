@@ -87,10 +87,10 @@ class PacketRouter : public PacingController::PacketSender {
       RTC_EXCLUSIVE_LOCKS_REQUIRED(modules_mutex_);
 
   mutable Mutex modules_mutex_;
-  // Taken before `modules_mutex_` while recording/replaying. The pacer sends
-  // every packet under `modules_mutex_` while the worker thread sends RTCP
-  // under it and posts to other threads, so the replay deadlocks unless they
-  // get it in the recorded order.
+  // Taken before `modules_mutex_` while recording/replaying. The pacer (for
+  // every packet) and the worker thread (for RTCP) both post to other threads
+  // while holding `modules_mutex_`, so the replay deadlocks unless they get it
+  // in the recorded order.
   int record_replay_ordered_lock_id_ = 0;
   // Ssrc to RtpRtcpInterface module;
   std::unordered_map<uint32_t, RtpRtcpInterface*> send_modules_map_
