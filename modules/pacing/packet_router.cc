@@ -17,6 +17,7 @@
 #include <utility>
 
 #include "absl/types/optional.h"
+#include "base/record_replay.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/rtcp_packet.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/transport_feedback.h"
@@ -34,7 +35,13 @@ PacketRouter::PacketRouter() : PacketRouter(0) {}
 PacketRouter::PacketRouter(uint16_t start_transport_seq)
     : last_send_module_(nullptr),
       active_remb_module_(nullptr),
-      transport_seq_(start_transport_seq) {}
+      transport_seq_(start_transport_seq) {
+  if (recordreplay::IsRecordingOrReplaying() &&
+      !recordreplay::AreEventsDisallowed()) {
+    record_replay_ordered_lock_id_ =
+        recordreplay::CreateOrderedLock("PacketRouter.modules_mutex_");
+  }
+}
 
 PacketRouter::~PacketRouter() {
   RTC_DCHECK(send_modules_map_.empty());
@@ -47,6 +54,9 @@ PacketRouter::~PacketRouter() {
 
 void PacketRouter::AddSendRtpModule(RtpRtcpInterface* rtp_module,
                                     bool remb_candidate) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&modules_mutex_);
 
   AddSendRtpModuleToMap(rtp_module, rtp_module->SSRC());
@@ -93,6 +103,9 @@ void PacketRouter::RemoveSendRtpModuleFromMap(uint32_t ssrc) {
 }
 
 void PacketRouter::RemoveSendRtpModule(RtpRtcpInterface* rtp_module) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&modules_mutex_);
   MaybeRemoveRembModuleCandidate(rtp_module, /* media_sender = */ true);
 
@@ -112,6 +125,9 @@ void PacketRouter::RemoveSendRtpModule(RtpRtcpInterface* rtp_module) {
 
 void PacketRouter::AddReceiveRtpModule(RtcpFeedbackSenderInterface* rtcp_sender,
                                        bool remb_candidate) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&modules_mutex_);
   RTC_DCHECK(std::find(rtcp_feedback_senders_.begin(),
                        rtcp_feedback_senders_.end(),
@@ -126,6 +142,9 @@ void PacketRouter::AddReceiveRtpModule(RtcpFeedbackSenderInterface* rtcp_sender,
 
 void PacketRouter::RemoveReceiveRtpModule(
     RtcpFeedbackSenderInterface* rtcp_sender) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&modules_mutex_);
   MaybeRemoveRembModuleCandidate(rtcp_sender, /* media_sender = */ false);
   auto it = std::find(rtcp_feedback_senders_.begin(),
@@ -140,6 +159,9 @@ void PacketRouter::SendPacket(std::unique_ptr<RtpPacketToSend> packet,
                "sequence_number", packet->SequenceNumber(), "rtp_timestamp",
                packet->Timestamp());
 
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&modules_mutex_);
   // With the new pacer code path, transport sequence numbers are only set here,
   // on the pacer thread. Therefore we don't need atomics/synchronization.
@@ -184,6 +206,9 @@ void PacketRouter::SendPacket(std::unique_ptr<RtpPacketToSend> packet,
 }
 
 std::vector<std::unique_ptr<RtpPacketToSend>> PacketRouter::FetchFec() {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&modules_mutex_);
   std::vector<std::unique_ptr<RtpPacketToSend>> fec_packets =
       std::move(pending_fec_packets_);
@@ -196,6 +221,9 @@ std::vector<std::unique_ptr<RtpPacketToSend>> PacketRouter::GeneratePadding(
   TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("webrtc"),
                "PacketRouter::GeneratePadding", "bytes", size.bytes());
 
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&modules_mutex_);
   // First try on the last rtp module to have sent media. This increases the
   // the chance that any payload based padding will be useful as it will be
@@ -238,6 +266,9 @@ std::vector<std::unique_ptr<RtpPacketToSend>> PacketRouter::GeneratePadding(
 void PacketRouter::OnAbortedRetransmissions(
     uint32_t ssrc,
     rtc::ArrayView<const uint16_t> sequence_numbers) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&modules_mutex_);
   auto it = send_modules_map_.find(ssrc);
   if (it != send_modules_map_.end()) {
@@ -246,6 +277,9 @@ void PacketRouter::OnAbortedRetransmissions(
 }
 
 absl::optional<uint32_t> PacketRouter::GetRtxSsrcForMedia(uint32_t ssrc) const {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&modules_mutex_);
   auto it = send_modules_map_.find(ssrc);
   if (it != send_modules_map_.end() && it->second->SSRC() == ssrc) {
@@ -257,11 +291,17 @@ absl::optional<uint32_t> PacketRouter::GetRtxSsrcForMedia(uint32_t ssrc) const {
 }
 
 uint16_t PacketRouter::CurrentTransportSequenceNumber() const {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&modules_mutex_);
   return transport_seq_ & 0xFFFF;
 }
 
 void PacketRouter::SendRemb(int64_t bitrate_bps, std::vector<uint32_t> ssrcs) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&modules_mutex_);
 
   if (!active_remb_module_) {
@@ -275,6 +315,9 @@ void PacketRouter::SendRemb(int64_t bitrate_bps, std::vector<uint32_t> ssrcs) {
 
 void PacketRouter::SendCombinedRtcpPacket(
     std::vector<std::unique_ptr<rtcp::RtcpPacket>> packets) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&modules_mutex_);
 
   // Prefer send modules.
