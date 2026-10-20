@@ -255,8 +255,9 @@ class RTCPSender final {
   // queue (OnSendingRtpFrame) and the worker (MaybeSendRtcp) both check under
   // `mutex_rtcp_sender_` whether a report is due and the first to send moves
   // the next report time, so which of them sends depends on which gets it
-  // first. PrepareReport also holds it while the next evaluation is posted to
-  // the worker (an ordered lock), so the replay can deadlock as well.
+  // first. SetNextRtcpSendEvaluationDuration also posts the next evaluation
+  // to the worker (an ordered lock) while it is held, so the replay can
+  // deadlock as well.
   int record_replay_ordered_lock_id_ = 0;
   bool sending_ RTC_GUARDED_BY(mutex_rtcp_sender_);
 
