@@ -253,8 +253,10 @@ class RTCPSender final {
   mutable Mutex mutex_rtcp_sender_;
   // Taken before `mutex_rtcp_sender_` while recording/replaying. The encoder
   // queue (OnSendingRtpFrame) and the worker (MaybeSendRtcp) both check under
-  // it whether a report is due and the first to send moves the next report
-  // time, so which of them sends depends on which gets it first.
+  // `mutex_rtcp_sender_` whether a report is due and the first to send moves
+  // the next report time, so which of them sends depends on which gets it
+  // first. PrepareReport also holds it while the next evaluation is posted to
+  // the worker (an ordered lock), so the replay can deadlock as well.
   int record_replay_ordered_lock_id_ = 0;
   bool sending_ RTC_GUARDED_BY(mutex_rtcp_sender_);
 
