@@ -18,10 +18,12 @@
 #include "absl/algorithm/container.h"
 #include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/optional.h"
 #include "api/array_view.h"
 #include "api/task_queue/task_queue_factory.h"
 #include "api/transport/field_trial_based_config.h"
 #include "api/video_codecs/video_codec.h"
+#include "base/record_replay.h"
 #include "call/rtp_transport_controller_send_interface.h"
 #include "modules/pacing/packet_router.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
@@ -407,6 +409,11 @@ RtpVideoSender::RtpVideoSender(
       encoder_target_rate_bps_(0),
       frame_counts_(rtp_config.ssrcs.size()),
       frame_count_observer_(observers.frame_count_observer) {
+  if (recordreplay::IsRecordingOrReplaying() &&
+      !recordreplay::AreEventsDisallowed()) {
+    record_replay_ordered_lock_id_ =
+        recordreplay::CreateOrderedLock("RtpVideoSender.mutex_");
+  }
   transport_checker_.Detach();
   RTC_DCHECK_EQ(rtp_config_.ssrcs.size(), rtp_streams_.size());
   if (send_side_bwe_with_overhead_ && has_packet_feedback_)
@@ -482,6 +489,9 @@ RtpVideoSender::~RtpVideoSender() {
 
 void RtpVideoSender::SetActive(bool active) {
   RTC_DCHECK_RUN_ON(&transport_checker_);
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_);
   if (active_ == active)
     return;
@@ -501,6 +511,9 @@ void RtpVideoSender::SetActive(bool active) {
 
 void RtpVideoSender::SetActiveModules(const std::vector<bool> active_modules) {
   RTC_DCHECK_RUN_ON(&transport_checker_);
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_);
   return SetActiveModulesLocked(active_modules);
 }
@@ -542,6 +555,9 @@ void RtpVideoSender::SetActiveModulesLocked(
 
 bool RtpVideoSender::IsActive() {
   RTC_DCHECK_RUN_ON(&transport_checker_);
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_);
   return IsActiveLocked();
 }
@@ -555,6 +571,9 @@ EncodedImageCallback::Result RtpVideoSender::OnEncodedImage(
     const CodecSpecificInfo* codec_specific_info) {
   fec_controller_->UpdateWithEncodedData(encoded_image.size(),
                                          encoded_image._frameType);
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_);
   RTC_DCHECK(!rtp_streams_.empty());
   if (!active_)
@@ -640,6 +659,9 @@ EncodedImageCallback::Result RtpVideoSender::OnEncodedImage(
 void RtpVideoSender::OnBitrateAllocationUpdated(
     const VideoBitrateAllocation& bitrate) {
   RTC_DCHECK_RUN_ON(&transport_checker_);
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_);
   if (IsActiveLocked()) {
     if (rtp_streams_.size() == 1) {
@@ -667,6 +689,9 @@ void RtpVideoSender::OnBitrateAllocationUpdated(
 }
 void RtpVideoSender::OnVideoLayersAllocationUpdated(
     const VideoLayersAllocation& allocation) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_);
   if (IsActiveLocked()) {
     for (size_t i = 0; i < rtp_streams_.size(); ++i) {
@@ -792,6 +817,9 @@ std::map<uint32_t, RtpState> RtpVideoSender::GetRtpStates() const {
 
 std::map<uint32_t, RtpPayloadState> RtpVideoSender::GetRtpPayloadStates()
     const {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_);
   std::map<uint32_t, RtpPayloadState> payload_states;
   for (const auto& param : params_) {
@@ -803,6 +831,9 @@ std::map<uint32_t, RtpPayloadState> RtpVideoSender::GetRtpPayloadStates()
 
 void RtpVideoSender::OnTransportOverheadChanged(
     size_t transport_overhead_bytes_per_packet) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_);
   transport_overhead_bytes_per_packet_ = transport_overhead_bytes_per_packet;
 
@@ -817,6 +848,9 @@ void RtpVideoSender::OnTransportOverheadChanged(
 void RtpVideoSender::OnBitrateUpdated(BitrateAllocationUpdate update,
                                       int framerate) {
   // Substract overhead from bitrate.
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_);
   size_t num_active_streams = 0;
   size_t overhead_bytes_per_packet = 0;
@@ -932,6 +966,9 @@ int RtpVideoSender::ProtectionRequest(const FecProtectionParams* delta_params,
 }
 
 void RtpVideoSender::SetFecAllowed(bool fec_allowed) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_);
   fec_allowed_ = fec_allowed;
 }
@@ -939,6 +976,9 @@ void RtpVideoSender::SetFecAllowed(bool fec_allowed) {
 void RtpVideoSender::OnPacketFeedbackVector(
     std::vector<StreamPacketInfo> packet_feedback_vector) {
   if (fec_controller_->UseLossVectorMask()) {
+    absl::optional<recordreplay::AutoOrderedLock> ordered;
+    if (record_replay_ordered_lock_id_)
+      ordered.emplace(record_replay_ordered_lock_id_);
     MutexLock lock(&mutex_);
     for (const StreamPacketInfo& packet : packet_feedback_vector) {
       loss_mask_vector_.push_back(!packet.received);
