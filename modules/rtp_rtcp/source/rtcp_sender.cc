@@ -195,6 +195,31 @@ RTCPSender::RTCPSender(Configuration config)
 
 RTCPSender::~RTCPSender() {}
 
+RTCPSender::RecordReplayFrameScope::RecordReplayFrameScope(
+    const RTCPSender* sender)
+    : sender_(sender) {
+  if (!sender_->record_replay_ordered_lock_id_) {
+    sender_ = nullptr;
+    return;
+  }
+  recordreplay::OrderedLock(sender_->record_replay_ordered_lock_id_);
+  sender_->record_replay_frame_scope_thread_.store(rtc::CurrentThreadRef());
+}
+
+void RTCPSender::RecordReplayFrameScope::Release() {
+  if (!sender_)
+    return;
+  sender_->record_replay_frame_scope_thread_.store(rtc::PlatformThreadRef());
+  recordreplay::OrderedUnlock(sender_->record_replay_ordered_lock_id_);
+  sender_ = nullptr;
+}
+
+bool RTCPSender::RecordReplayTakesOrderedLock() const {
+  return record_replay_ordered_lock_id_ &&
+         !rtc::IsThreadRefEqual(record_replay_frame_scope_thread_.load(),
+                                rtc::CurrentThreadRef());
+}
+
 RtcpMode RTCPSender::Status() const {
   absl::optional<recordreplay::AutoOrderedLock> ordered;
   if (record_replay_ordered_lock_id_)
@@ -220,7 +245,7 @@ void RTCPSender::SetRTCPStatus(RtcpMode new_method) {
 
 bool RTCPSender::Sending() const {
   absl::optional<recordreplay::AutoOrderedLock> ordered;
-  if (record_replay_ordered_lock_id_)
+  if (RecordReplayTakesOrderedLock())
     ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_rtcp_sender_);
   return sending_;
@@ -360,7 +385,7 @@ void RTCPSender::SetLastRtpTime(uint32_t rtp_timestamp,
                                 absl::optional<Timestamp> capture_time,
                                 absl::optional<int8_t> payload_type) {
   absl::optional<recordreplay::AutoOrderedLock> ordered;
-  if (record_replay_ordered_lock_id_)
+  if (RecordReplayTakesOrderedLock())
     ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_rtcp_sender_);
   // For compatibility with clients who don't set payload type correctly on all
@@ -481,7 +506,7 @@ bool RTCPSender::TimeToSendRTCPReport(bool sendKeyframeBeforeRTP) const {
   Timestamp now = clock_->CurrentTime();
 
   absl::optional<recordreplay::AutoOrderedLock> ordered;
-  if (record_replay_ordered_lock_id_)
+  if (RecordReplayTakesOrderedLock())
     ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_rtcp_sender_);
   RTC_DCHECK(
