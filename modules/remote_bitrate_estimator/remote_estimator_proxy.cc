@@ -64,7 +64,7 @@ RemoteEstimatorProxy::RemoteEstimatorProxy(
       abs_send_timestamp_(Timestamp::Zero()) {
   if (recordreplay::IsRecordingOrReplaying() &&
       !recordreplay::AreEventsDisallowed()) {
-    record_replay_send_interval_ = true;
+    record_replay_send_interval_recorded_ = true;
     record_replay_send_interval_us_ = send_interval_.us();
   }
   RTC_LOG(LS_INFO)
@@ -161,7 +161,7 @@ TimeDelta RemoteEstimatorProxy::Process(Timestamp now) {
   if (!send_periodic_feedback_) {
     return TimeDelta::PlusInfinity();
   }
-  if (record_replay_send_interval_) {
+  if (record_replay_send_interval_recorded_) {
     send_interval_ = TimeDelta::Micros(recordreplay::RecordReplayValue(
         "RemoteEstimatorProxy::send_interval_",
         record_replay_send_interval_us_.load()));
@@ -197,7 +197,7 @@ void RemoteEstimatorProxy::OnBitrateChanged(int bitrate_bps) {
                                 : std::max(kTwccReportSize / twcc_bitrate,
                                            send_config_.min_interval.Get());
 
-  if (record_replay_send_interval_) {
+  if (record_replay_send_interval_recorded_) {
     record_replay_send_interval_us_.store(send_interval.us());
     return;
   }
