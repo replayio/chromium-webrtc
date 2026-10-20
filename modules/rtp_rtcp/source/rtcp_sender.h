@@ -251,6 +251,14 @@ class RTCPSender final {
       schedule_next_rtcp_send_evaluation_function_;
 
   mutable Mutex mutex_rtcp_sender_;
+  // Taken before `mutex_rtcp_sender_` while recording/replaying. The encoder
+  // queue (OnSendingRtpFrame) and the worker (MaybeSendRtcp) both check under
+  // `mutex_rtcp_sender_` whether a report is due and the first to send moves
+  // the next report time, so which of them sends depends on which gets it
+  // first. SetNextRtcpSendEvaluationDuration also posts the next evaluation
+  // to the worker (an ordered lock) while it is held, so the replay can
+  // deadlock as well.
+  int record_replay_ordered_lock_id_ = 0;
   bool sending_ RTC_GUARDED_BY(mutex_rtcp_sender_);
 
   absl::optional<Timestamp> next_time_to_send_rtcp_
