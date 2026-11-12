@@ -36,6 +36,8 @@
 #include "rtc_base/net_helpers.h"
 #include "rtc_base/socket_address.h"
 
+#include "base/record_replay.h"
+
 using webrtc::Candidate;
 using ::webrtc::SessionDescription;
 
@@ -172,10 +174,14 @@ SessionDescriptionInternal::SessionDescriptionInternal(
       id_(id),
       version_(version),
       description_(std::move(description)) {
+  recordreplay::RegisterPointer("JsepSessionDescription", this);
+  recordreplay::Assert("JsepSessionDescription %lu", id.length());
   RTC_DCHECK(description_ || sdp_type_ == SdpType::kRollback);
 }
 
-SessionDescriptionInternal::~SessionDescriptionInternal() = default;
+SessionDescriptionInternal::~SessionDescriptionInternal() {
+  recordreplay::UnregisterPointer(this);
+}
 
 size_t SessionDescriptionInternal::mediasection_count() const {
   return description_ ? description_->contents().size() : 0u;
