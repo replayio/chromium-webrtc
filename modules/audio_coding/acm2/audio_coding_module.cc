@@ -15,7 +15,9 @@
 
 #include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/optional.h"
 #include "api/array_view.h"
+#include "base/record_replay.h"
 #include "modules/audio_coding/acm2/acm_receiver.h"
 #include "modules/audio_coding/acm2/acm_remixing.h"
 #include "modules/audio_coding/acm2/acm_resampler.h"
@@ -226,6 +228,11 @@ AudioCodingModuleImpl::AudioCodingModuleImpl(
       packetization_callback_(NULL),
       codec_histogram_bins_log_(),
       number_of_consecutive_empty_packets_(0) {
+  if (recordreplay::IsRecordingOrReplaying() &&
+      !recordreplay::AreEventsDisallowed()) {
+    record_replay_ordered_lock_id_ =
+        recordreplay::CreateOrderedLock("AudioCodingModuleImpl.acm_mutex_");
+  }
   if (InitializeReceiverSafe() < 0) {
     RTC_LOG(LS_ERROR) << "Cannot initialize receiver";
   }
@@ -324,6 +331,9 @@ int32_t AudioCodingModuleImpl::Encode(
 
 void AudioCodingModuleImpl::ModifyEncoder(
     rtc::FunctionView<void(std::unique_ptr<AudioEncoder>*)> modifier) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&acm_mutex_);
   modifier(&encoder_stack_);
 }
@@ -339,6 +349,9 @@ int AudioCodingModuleImpl::RegisterTransportCallback(
 
 // Add 10MS of raw (PCM) audio data to the encoder.
 int AudioCodingModuleImpl::Add10MsData(const AudioFrame& audio_frame) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&acm_mutex_);
   int r = Add10MsDataInternal(audio_frame, &input_data_);
   // TODO(bugs.webrtc.org/10739): add dcheck that
@@ -527,6 +540,9 @@ int AudioCodingModuleImpl::PreprocessToAddData(const AudioFrame& in_frame,
 //
 
 int AudioCodingModuleImpl::SetPacketLossRate(int loss_rate) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&acm_mutex_);
   if (HaveValidEncoder("SetPacketLossRate")) {
     encoder_stack_->OnReceivedUplinkPacketLossFraction(loss_rate / 100.0);
@@ -539,6 +555,9 @@ int AudioCodingModuleImpl::SetPacketLossRate(int loss_rate) {
 //
 
 int AudioCodingModuleImpl::InitializeReceiver() {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&acm_mutex_);
   return InitializeReceiverSafe();
 }
@@ -558,6 +577,9 @@ int AudioCodingModuleImpl::InitializeReceiverSafe() {
 
 void AudioCodingModuleImpl::SetReceiveCodecs(
     const std::map<int, SdpAudioFormat>& codecs) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&acm_mutex_);
   receiver_.SetCodecs(codecs);
 }
@@ -606,6 +628,9 @@ bool AudioCodingModuleImpl::HaveValidEncoder(
 }
 
 ANAStats AudioCodingModuleImpl::GetANAStats() const {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&acm_mutex_);
   if (encoder_stack_)
     return encoder_stack_->GetANAStats();
@@ -614,6 +639,9 @@ ANAStats AudioCodingModuleImpl::GetANAStats() const {
 }
 
 int AudioCodingModuleImpl::GetTargetBitrate() const {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&acm_mutex_);
   if (!encoder_stack_) {
     return -1;
