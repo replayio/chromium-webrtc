@@ -31,6 +31,7 @@
 #include "api/task_queue/task_queue_base.h"
 #include "api/transport/stun.h"
 #include "api/units/timestamp.h"
+#include "base/record_replay.h"
 #include "logging/rtc_event_log/events/rtc_event_ice_candidate_pair.h"
 #include "logging/rtc_event_log/events/rtc_event_ice_candidate_pair_config.h"
 #include "logging/rtc_event_log/ice_logger.h"
@@ -1334,7 +1335,11 @@ bool Connection::stable(int64_t now) const {
 }
 
 std::string Connection::ToDebugId() const {
-  return rtc::ToHex(reinterpret_cast<uintptr_t>(this));
+  // The replay's address differs from the recording's, and the replay checks
+  // the length of every log line written, so logs print the recorded address
+  // (as Port::ToString does).
+  return rtc::ToHex(recordreplay::RecordReplayValue(
+      "cricket/Connection address", reinterpret_cast<uintptr_t>(this)));
 }
 
 uint32_t Connection::ComputeNetworkCost() const {
