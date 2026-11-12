@@ -39,6 +39,8 @@
 #include "rtc_base/time_utils.h"
 #include "rtc_base/trace_event.h"
 
+#include "base/record_replay.h"
+
 using webrtc::IceCandidateType;
 
 namespace cricket {
@@ -879,7 +881,12 @@ void Port::OnNetworkTypeChanged(const rtc::Network* network) {
 
 std::string Port::ToString() const {
   rtc::StringBuilder ss;
-  ss << "Port[" << rtc::ToHex(reinterpret_cast<uintptr_t>(this)) << ":"
+  ss << "Port[" << rtc::ToHex(
+       recordreplay::RecordReplayValue(
+         "cricket/Port address",
+         reinterpret_cast<uintptr_t>(this)
+       ))
+     << ":"
      << content_name_ << ":" << component_ << ":" << generation_ << ":"
      << webrtc::IceCandidateTypeToString(type_) << ":" << network_->ToString()
      << "]";
