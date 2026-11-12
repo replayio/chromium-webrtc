@@ -29,6 +29,8 @@
 #include "rtc_base/ssl_identity.h"
 #include "rtc_base/string_encode.h"
 
+#include "base/record_replay.h"
+
 namespace webrtc {
 
 std::unique_ptr<SSLFingerprint> SSLFingerprint::Create(
@@ -45,6 +47,9 @@ std::unique_ptr<SSLFingerprint> SSLFingerprint::Create(
   if (!ret) {
     return nullptr;
   }
+  // Digests can vary when replaying due to the use of OpenSSL.
+  recordreplay::RecordReplayBytes("SSLFingerprint::Create",
+                                  digest.data(), digest.size());
   return std::make_unique<SSLFingerprint>(algorithm, digest);
 }
 
@@ -95,7 +100,10 @@ std::unique_ptr<SSLFingerprint> SSLFingerprint::CreateFromCertificate(
 
 SSLFingerprint::SSLFingerprint(absl::string_view algorithm,
                                std::span<const uint8_t> digest_view)
-    : algorithm(algorithm), digest(digest_view) {}
+    : algorithm(algorithm), digest(digest_view) {
+  recordreplay::AssertBytes("SSLFingerprint",
+                            digest_view.data(), digest_view.size());
+}
 
 bool SSLFingerprint::operator==(const SSLFingerprint& other) const {
   return algorithm == other.algorithm && digest == other.digest;
