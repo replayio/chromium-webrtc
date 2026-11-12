@@ -62,6 +62,11 @@ RemoteEstimatorProxy::RemoteEstimatorProxy(
       send_periodic_feedback_(true),
       previous_abs_send_time_(0),
       abs_send_timestamp_(Timestamp::Zero()) {
+  if (recordreplay::IsRecordingOrReplaying() &&
+      !recordreplay::AreEventsDisallowed()) {
+    record_replay_send_interval_recorded_ = true;
+    record_replay_send_interval_us_ = send_interval_.us();
+  }
   RTC_LOG(LS_INFO)
       << "Maximum interval between transport feedback RTCP messages (ms): "
       << send_config_.max_interval->ms();
@@ -192,6 +197,10 @@ void RemoteEstimatorProxy::OnBitrateChanged(int bitrate_bps) {
                                 : std::max(kTwccReportSize / twcc_bitrate,
                                            send_config_.min_interval.Get());
 
+  if (record_replay_send_interval_recorded_) {
+    record_replay_send_interval_us_.store(send_interval.us());
+    return;
+  }
   MutexLock lock(&lock_);
   send_interval_ = send_interval;
 }
