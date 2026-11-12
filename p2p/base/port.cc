@@ -55,6 +55,8 @@
 #include "rtc_base/trace_event.h"
 #include "rtc_base/weak_ptr.h"
 
+#include "base/record_replay.h"
+
 namespace webrtc {
 namespace {
 
@@ -856,7 +858,12 @@ void Port::OnNetworkTypeChanged(const ::webrtc::Network* network) {
 
 std::string Port::ToString() const {
   StringBuilder ss;
-  ss << "Port[" << ToHex(reinterpret_cast<uintptr_t>(this)) << ":"
+  ss << "Port[" << ToHex(
+       recordreplay::RecordReplayValue(
+         "cricket/Port address",
+         reinterpret_cast<uintptr_t>(this)
+       ))
+     << ":"
      << content_name_ << ":" << component_ << ":" << generation_ << ":"
      << IceCandidateTypeToString(type_) << ":" << network_->ToString() << "]";
   return ss.Release();
