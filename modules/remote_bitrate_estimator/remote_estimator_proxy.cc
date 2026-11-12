@@ -16,6 +16,7 @@
 #include <utility>
 
 #include "api/units/data_size.h"
+#include "base/record_replay.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/remote_estimate.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/transport_feedback.h"
 #include "rtc_base/checks.h"
@@ -155,6 +156,11 @@ TimeDelta RemoteEstimatorProxy::Process(Timestamp now) {
   MutexLock lock(&lock_);
   if (!send_periodic_feedback_) {
     return TimeDelta::PlusInfinity();
+  }
+  if (record_replay_send_interval_recorded_) {
+    send_interval_ = TimeDelta::Micros(recordreplay::RecordReplayValue(
+        "RemoteEstimatorProxy::send_interval_",
+        record_replay_send_interval_us_.load()));
   }
   Timestamp next_process_time = last_process_time_ + send_interval_;
   if (now >= next_process_time) {
