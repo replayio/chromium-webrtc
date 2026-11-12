@@ -47,6 +47,7 @@
 #include "api/task_queue/pending_task_safety_flag.h"
 #include "api/task_queue/task_queue_base.h"
 #include "api/video_codecs/video_encoder_factory.h"
+#include "base/record_replay.h"
 #include "media/base/audio_source.h"
 #include "media/base/codec.h"
 #include "media/base/media_channel.h"
@@ -1276,9 +1277,18 @@ RtpSenderBase::CreateSframeEncryptorOrError(
                   "Sframe encrypter not yet implemented");
 }
 
-LocalAudioSinkAdapter::LocalAudioSinkAdapter() : sink_(nullptr) {}
+LocalAudioSinkAdapter::LocalAudioSinkAdapter() : sink_(nullptr) {
+  if (recordreplay::IsRecordingOrReplaying() &&
+      !recordreplay::AreEventsDisallowed()) {
+    record_replay_sink_ordered_lock_id_ =
+        recordreplay::CreateOrderedLock("LocalAudioSinkAdapter.lock_");
+  }
+}
 
 LocalAudioSinkAdapter::~LocalAudioSinkAdapter() {
+  std::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_sink_ordered_lock_id_)
+    ordered.emplace(record_replay_sink_ordered_lock_id_);
   MutexLock lock(&lock_);
   if (sink_)
     sink_->OnClose();
@@ -1293,6 +1303,9 @@ void LocalAudioSinkAdapter::OnData(
     std::optional<int64_t> absolute_capture_timestamp_ms) {
   TRACE_EVENT2("webrtc", "LocalAudioSinkAdapter::OnData", "sample_rate",
                sample_rate, "number_of_frames", number_of_frames);
+  std::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_sink_ordered_lock_id_)
+    ordered.emplace(record_replay_sink_ordered_lock_id_);
   MutexLock lock(&lock_);
   if (sink_) {
     sink_->OnData(audio_data, bits_per_sample, sample_rate, number_of_channels,
@@ -1302,6 +1315,9 @@ void LocalAudioSinkAdapter::OnData(
 }
 
 void LocalAudioSinkAdapter::SetSink(AudioSource::Sink* sink) {
+  std::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_sink_ordered_lock_id_)
+    ordered.emplace(record_replay_sink_ordered_lock_id_);
   MutexLock lock(&lock_);
   RTC_DCHECK(!sink || !sink_);
   sink_ = sink;
