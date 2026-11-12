@@ -28,6 +28,7 @@
 #include "api/transport/stun.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
+#include "base/record_replay.h"
 #include "p2p/base/connection.h"
 #include "p2p/base/p2p_constants.h"
 #include "p2p/base/port.h"
@@ -368,6 +369,8 @@ void UDPPort::set_stun_keepalive_delay(const std::optional<TimeDelta>& delay) {
 
 void UDPPort::OnLocalAddressReady(AsyncPacketSocket* /* socket */,
                                   const SocketAddress& address) {
+  recordreplay::Assert("UDPPort::OnLocalAddressReady %d", address.IsAnyIP());
+
   // When adapter enumeration is disabled and binding to the any address, the
   // default local address will be issued as a candidate instead if
   // `emit_local_for_anyaddress` is true. This is to allow connectivity for
@@ -378,6 +381,7 @@ void UDPPort::OnLocalAddressReady(AsyncPacketSocket* /* socket */,
   // least the port is listening.
   MaybeSetDefaultLocalAddress(&addr);
 
+  recordreplay::Assert("UDPPort::OnLocalAddressReady #1 %d", addr.IsAnyIP());
   AddAddress(addr, addr, SocketAddress(), UDP_PROTOCOL_NAME, "", "",
              IceCandidateType::kHost, ICE_TYPE_PREFERENCE_HOST, 0, "", false);
   MaybePrepareStunCandidate();
