@@ -22,6 +22,7 @@
 #include "api/units/data_size.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
+#include "base/record_replay.h"
 #include "modules/remote_bitrate_estimator/packet_arrival_map.h"
 #include "modules/rtp_rtcp/source/rtcp_packet.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/transport_feedback.h"
@@ -129,6 +130,11 @@ TimeDelta TransportSequenceNumberFeedbackGenenerator::Process(Timestamp now) {
     // If TransportSequenceNumberV2 has been received in one packet,
     // PeriodicFeedback is disabled for the rest of the call.
     return TimeDelta::PlusInfinity();
+  }
+  if (record_replay_send_interval_recorded_) {
+    send_interval_ = TimeDelta::Micros(recordreplay::RecordReplayValue(
+        "RemoteEstimatorProxy::send_interval_",
+        record_replay_send_interval_us_.load()));
   }
   Timestamp next_process_time = last_process_time_ + send_interval_;
   if (now >= next_process_time) {
