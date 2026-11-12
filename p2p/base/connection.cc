@@ -23,6 +23,7 @@
 #include "absl/strings/string_view.h"
 #include "api/array_view.h"
 #include "api/units/timestamp.h"
+#include "base/record_replay.h"
 #include "p2p/base/p2p_constants.h"
 #include "rtc_base/byte_buffer.h"
 #include "rtc_base/checks.h"
@@ -1278,7 +1279,11 @@ bool Connection::stable(int64_t now) const {
 }
 
 std::string Connection::ToDebugId() const {
-  return rtc::ToHex(reinterpret_cast<uintptr_t>(this));
+  // The replay's address differs from the recording's, and the replay checks
+  // the length of every log line written, so logs print the recorded address
+  // (as Port::ToString does).
+  return rtc::ToHex(recordreplay::RecordReplayValue(
+      "cricket/Connection address", reinterpret_cast<uintptr_t>(this)));
 }
 
 uint32_t Connection::ComputeNetworkCost() const {
