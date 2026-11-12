@@ -16,6 +16,7 @@
 #include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
 #include "api/transport/stun.h"
+#include "base/record_replay.h"
 #include "p2p/base/connection.h"
 #include "p2p/base/p2p_constants.h"
 #include "p2p/base/port_allocator.h"
@@ -351,6 +352,8 @@ void UDPPort::set_stun_keepalive_delay(const std::optional<int>& delay) {
 
 void UDPPort::OnLocalAddressReady(rtc::AsyncPacketSocket* socket,
                                   const rtc::SocketAddress& address) {
+  recordreplay::Assert("UDPPort::OnLocalAddressReady %d", address.IsAnyIP());
+
   // When adapter enumeration is disabled and binding to the any address, the
   // default local address will be issued as a candidate instead if
   // `emit_local_for_anyaddress` is true. This is to allow connectivity for
@@ -361,6 +364,7 @@ void UDPPort::OnLocalAddressReady(rtc::AsyncPacketSocket* socket,
   // least the port is listening.
   MaybeSetDefaultLocalAddress(&addr);
 
+  recordreplay::Assert("UDPPort::OnLocalAddressReady #1 %d", addr.IsAnyIP());
   AddAddress(addr, addr, rtc::SocketAddress(), UDP_PROTOCOL_NAME, "", "",
              webrtc::IceCandidateType::kHost, ICE_TYPE_PREFERENCE_HOST, 0, "",
              false);

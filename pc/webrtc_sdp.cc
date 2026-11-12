@@ -37,6 +37,7 @@
 #include "api/rtc_error.h"
 #include "api/rtp_parameters.h"
 #include "api/rtp_transceiver_direction.h"
+#include "base/record_replay.h"
 #include "media/base/codec.h"
 #include "media/base/media_constants.h"
 #include "media/base/rid_description.h"
@@ -851,6 +852,7 @@ std::string SdpSerialize(const JsepSessionDescription& jdesc) {
 
   // Session Description.
   AddLine(kSessionVersion, &message);
+  recordreplay::Assert("SdpSerialize #1 %lu", message.length());
   // Session Origin
   // RFC 4566
   // o=<username> <sess-id> <sess-version> <nettype> <addrtype>
@@ -862,14 +864,19 @@ std::string SdpSerialize(const JsepSessionDescription& jdesc) {
   const std::string& session_version = jdesc.session_version().empty()
                                            ? kSessionOriginSessionVersion
                                            : jdesc.session_version();
+  recordreplay::Assert("SdpSerialize #1.1 %lu %lu",
+                       session_id.length(), session_version.length());
   os << " " << session_id << " " << session_version << " "
      << kSessionOriginNettype << " " << kSessionOriginAddrtype << " "
      << kSessionOriginAddress;
   AddLine(os.str(), &message);
+  recordreplay::Assert("SdpSerialize #2 %lu", message.length());
   AddLine(kSessionName, &message);
+  recordreplay::Assert("SdpSerialize #3 %lu", message.length());
 
   // Time Description.
   AddLine(kTimeDescription, &message);
+  recordreplay::Assert("SdpSerialize #4 %lu", message.length());
 
   // BUNDLE Groups
   std::vector<const cricket::ContentGroup*> groups =
@@ -882,12 +889,14 @@ std::string SdpSerialize(const JsepSessionDescription& jdesc) {
       group_line.append(content_name);
     }
     AddLine(group_line, &message);
+    recordreplay::Assert("SdpSerialize #5 %lu", message.length());
   }
 
   // Mixed one- and two-byte header extension.
   if (desc->extmap_allow_mixed()) {
     InitAttrLine(kAttributeExtmapAllowMixed, &os);
     AddLine(os.str(), &message);
+    recordreplay::Assert("SdpSerialize #6 %lu", message.length());
   }
 
   // MediaStream semantics.
@@ -915,6 +924,7 @@ std::string SdpSerialize(const JsepSessionDescription& jdesc) {
     }
     AddLine(os.str(), &message);
   }
+  recordreplay::Assert("SdpSerialize #7 %lu", message.length());
 
   // a=ice-lite
   //
@@ -925,6 +935,7 @@ std::string SdpSerialize(const JsepSessionDescription& jdesc) {
     if (transport.description.ice_mode == cricket::ICEMODE_LITE) {
       InitAttrLine(kAttributeIceLite, &os);
       AddLine(os.str(), &message);
+      recordreplay::Assert("SdpSerialize #8 %lu", message.length());
       break;
     }
   }
@@ -937,7 +948,10 @@ std::string SdpSerialize(const JsepSessionDescription& jdesc) {
     BuildMediaDescription(&content, desc->GetTransportInfoByName(content.name),
                           content.media_description()->type(), candidates,
                           desc->msid_signaling(), &message);
+    recordreplay::Assert("SdpSerialize #9 %lu", message.length());
   }
+
+  recordreplay::Assert("SdpSerialize #10 %lu", message.length());
   return message;
 }
 
@@ -1361,12 +1375,14 @@ void BuildIceUfragPwd(const TransportInfo* transport_info,
     InitAttrLine(kAttributeIceUfrag, &os);
     os << kSdpDelimiterColon << transport_info->description.ice_ufrag;
     AddLine(os.str(), message);
+    recordreplay::Assert("BuildMediaDescription #8 %lu", message->length());
   }
   // ice-pwd
   if (!transport_info->description.ice_pwd.empty()) {
     InitAttrLine(kAttributeIcePwd, &os);
     os << kSdpDelimiterColon << transport_info->description.ice_pwd;
     AddLine(os.str(), message);
+    recordreplay::Assert("BuildMediaDescription #9 %lu", message->length());
   }
 }
 
@@ -1388,6 +1404,7 @@ void BuildDtlsFingerprintSetup(const TransportInfo* transport_info,
   os << kSdpDelimiterColon << fingerprint->algorithm << kSdpDelimiterSpace
      << fingerprint->GetRfc4572Fingerprint();
   AddLine(os.str(), message);
+  recordreplay::Assert("BuildMediaDescription #11 %lu", message->length());
 
   // Inserting setup attribute.
   if (transport_info->description.connection_role !=
@@ -1400,6 +1417,7 @@ void BuildDtlsFingerprintSetup(const TransportInfo* transport_info,
     InitAttrLine(kAttributeSetup, &os);
     os << kSdpDelimiterColon << dtls_role_str;
     AddLine(os.str(), message);
+    recordreplay::Assert("BuildMediaDescription #12 %lu", message->length());
   }
 }
 
@@ -1489,6 +1507,7 @@ void BuildMediaDescription(const ContentInfo* content_info,
 
   // Add the m line.
   BuildMediaLine(media_type, content_info, media_desc, message);
+  recordreplay::Assert("BuildMediaDescription #1 %lu", message->length());
   // Add the c line.
   InitLine(kLineTypeConnection, kConnectionNettype, &os);
   if (media_desc->connection_address().IsNil()) {
@@ -1503,6 +1522,7 @@ void BuildMediaDescription(const ContentInfo* content_info,
     os << " " << kConnectionIpv4Addrtype << " " << kDummyAddress;
   }
   AddLine(os.str(), message);
+  recordreplay::Assert("BuildMediaDescription #2 %lu", message->length());
 
   // RFC 4566
   // b=AS:<bandwidth> or
@@ -1514,16 +1534,19 @@ void BuildMediaDescription(const ContentInfo* content_info,
     bandwidth /= 1000;
     os << kSdpDelimiterColon << bandwidth;
     AddLine(os.str(), message);
+    recordreplay::Assert("BuildMediaDescription #3 %lu", message->length());
   } else if (bandwidth_type == kTransportSpecificBandwidth && bandwidth > 0) {
     InitLine(kLineTypeSessionBandwidth, bandwidth_type, &os);
     os << kSdpDelimiterColon << bandwidth;
     AddLine(os.str(), message);
+    recordreplay::Assert("BuildMediaDescription #4 %lu", message->length());
   }
 
   // Add the a=bundle-only line.
   if (content_info->bundle_only) {
     InitAttrLine(kAttributeBundleOnly, &os);
     AddLine(os.str(), message);
+    recordreplay::Assert("BuildMediaDescription #5 %lu", message->length());
   }
 
   // Add the a=rtcp line.
@@ -1531,12 +1554,14 @@ void BuildMediaDescription(const ContentInfo* content_info,
     std::string rtcp_line = GetRtcpLine(candidates);
     if (!rtcp_line.empty()) {
       AddLine(rtcp_line, message);
+      recordreplay::Assert("BuildMediaDescription #6 %lu", message->length());
     }
   }
 
   // Build the a=candidate lines. We don't include ufrag and pwd in the
   // candidates in the SDP to avoid redundancy.
   BuildCandidate(candidates, false, message);
+  recordreplay::Assert("BuildMediaDescription #7 %lu", message->length());
 
   // Use the transport_info to build the media level ice-ufrag, ice-pwd
   // and DTLS fingerprint and setup attributes.
@@ -1545,6 +1570,7 @@ void BuildMediaDescription(const ContentInfo* content_info,
 
     // draft-petithuguenin-mmusic-ice-attributes-level-03
     BuildIceOptions(transport_info->description.transport_options, message);
+    recordreplay::Assert("BuildMediaDescription #10 %lu", message->length());
 
     // Also include the DTLS fingerprint and setup attribute if available.
     BuildDtlsFingerprintSetup(transport_info, message);
@@ -1557,14 +1583,19 @@ void BuildMediaDescription(const ContentInfo* content_info,
   InitAttrLine(kAttributeMid, &os);
   os << kSdpDelimiterColon << content_info->name;
   AddLine(os.str(), message);
+  recordreplay::Assert("BuildMediaDescription #13 %lu", message->length());
 
   if (cricket::IsDtlsSctp(media_desc->protocol())) {
     const cricket::SctpDataContentDescription* data_desc =
         media_desc->as_sctp();
     BuildSctpContentAttributes(message, data_desc);
+    recordreplay::Assert("BuildMediaDescription #14 %lu", message->length());
   } else if (cricket::IsRtpProtocol(media_desc->protocol())) {
     BuildRtpContentAttributes(media_desc, media_type, msid_signaling, message);
+    recordreplay::Assert("BuildMediaDescription #15 %lu", message->length());
   }
+
+  recordreplay::Assert("BuildMediaDescription Done %lu", message->length());
 }
 
 void BuildRtpContentAttributes(const MediaContentDescription* media_desc,
@@ -1582,6 +1613,7 @@ void BuildRtpContentAttributes(const MediaContentDescription* media_desc,
       MediaContentDescription::kMedia) {
     InitAttrLine(kAttributeExtmapAllowMixed, &os);
     AddLine(os.str(), message);
+    recordreplay::Assert("BuildRtpContentAttributes #1 %lu", message->length());
   }
   BuildRtpHeaderExtensions(media_desc->rtp_header_extensions(), message);
 
@@ -1608,6 +1640,7 @@ void BuildRtpContentAttributes(const MediaContentDescription* media_desc,
       break;
   }
   AddLine(os.str(), message);
+  recordreplay::Assert("BuildRtpContentAttributes #3 %lu", message->length());
 
   // Specified in https://datatracker.ietf.org/doc/draft-ietf-mmusic-msid/16/
   // a=msid:<msid-id> <msid-appdata>
@@ -1628,6 +1661,7 @@ void BuildRtpContentAttributes(const MediaContentDescription* media_desc,
         InitAttrLine(kAttributeMsid, &os);
         os << kSdpDelimiterColon << stream_id << kSdpDelimiterSpace << track.id;
         AddLine(os.str(), message);
+        recordreplay::Assert("BuildRtpContentAttributes #4 %lu", message->length());
       }
     } else if (streams.size() > 1u) {
       RTC_LOG(LS_WARNING)
@@ -1641,6 +1675,7 @@ void BuildRtpContentAttributes(const MediaContentDescription* media_desc,
   if (media_desc->rtcp_mux()) {
     InitAttrLine(kAttributeRtcpMux, &os);
     AddLine(os.str(), message);
+    recordreplay::Assert("BuildRtpContentAttributes #5 %lu", message->length());
   }
 
   // RFC 5506
@@ -1648,17 +1683,20 @@ void BuildRtpContentAttributes(const MediaContentDescription* media_desc,
   if (media_desc->rtcp_reduced_size()) {
     InitAttrLine(kAttributeRtcpReducedSize, &os);
     AddLine(os.str(), message);
+    recordreplay::Assert("BuildRtpContentAttributes #6 %lu", message->length());
   }
 
   if (media_desc->conference_mode()) {
     InitAttrLine(kAttributeXGoogleFlag, &os);
     os << kSdpDelimiterColon << kValueConference;
     AddLine(os.str(), message);
+    recordreplay::Assert("BuildRtpContentAttributes #7 %lu", message->length());
   }
 
   if (media_desc->remote_estimate()) {
     InitAttrLine(kAttributeRtcpRemoteEstimate, &os);
     AddLine(os.str(), message);
+    recordreplay::Assert("BuildRtpContentAttributes #8 %lu", message->length());
   }
 
   // RFC 4566
@@ -1718,11 +1756,14 @@ void BuildRtpContentAttributes(const MediaContentDescription* media_desc,
     }
   }
 
+  recordreplay::Assert("BuildRtpContentAttributes #11 %lu", message->length());
+
   for (const RidDescription& rid_description : media_desc->receive_rids()) {
     InitAttrLine(kAttributeRid, &os);
     os << kSdpDelimiterColon
        << serializer.SerializeRidDescription(rid_description);
     AddLine(os.str(), message);
+    recordreplay::Assert("BuildRtpContentAttributes #12 %lu", message->length());
   }
 
   // Simulcast (a=simulcast)
@@ -1733,7 +1774,10 @@ void BuildRtpContentAttributes(const MediaContentDescription* media_desc,
     os << kSdpDelimiterColon
        << serializer.SerializeSimulcastDescription(simulcast);
     AddLine(os.str(), message);
+    recordreplay::Assert("BuildRtpContentAttributes #13 %lu", message->length());
   }
+
+  recordreplay::Assert("BuildRtpContentAttributes Done %lu", message->length());
 }
 
 void BuildRtpHeaderExtensions(const RtpHeaderExtensions& extensions,
@@ -1752,6 +1796,7 @@ void BuildRtpHeaderExtensions(const RtpHeaderExtensions& extensions,
     }
     os << kSdpDelimiterSpace << extension.uri;
     AddLine(os.str(), message);
+    recordreplay::Assert("BuildRtpContentAttributes #2 %lu", message->length());
   }
 }
 
