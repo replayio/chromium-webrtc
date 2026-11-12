@@ -38,6 +38,7 @@
 #include "api/transport/ecn_marking.h"
 #include "api/transport/enums.h"
 #include "api/units/timestamp.h"
+#include "base/record_replay.h"
 #include "call/payload_type.h"
 #include "call/payload_type_picker.h"
 #include "media/base/codec.h"
@@ -1331,6 +1332,8 @@ void JsepTransportController::OnTransportGatheringState_n(
 void JsepTransportController::OnTransportCandidateGathered_n(
     IceTransportInternal* transport,
     const Candidate& candidate) {
+  recordreplay::Assert("JsepTransportController::OnTransportCandidateGathered Start");
+
   // We should never signal peer-reflexive candidates.
   if (candidate.is_prflx()) {
     RTC_DCHECK_NOTREACHED();
@@ -1339,6 +1342,8 @@ void JsepTransportController::OnTransportCandidateGathered_n(
 
   config_.signal_ice_candidates_gathered(transport->transport_name(),
                                          std::vector<Candidate>{candidate});
+
+  recordreplay::Assert("JsepTransportController::OnTransportCandidateGathered Done");
 }
 
 void JsepTransportController::OnTransportCandidateError_n(
