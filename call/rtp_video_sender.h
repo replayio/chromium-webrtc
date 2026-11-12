@@ -186,7 +186,7 @@ class RtpVideoSender : public RtpVideoSenderInterface,
   // transport task queue.
   mutable Mutex mutex_;
   // Taken before `mutex_` while recording/replaying. The encoder queue holds
-  // `mutex_` in OnEncodedImage, the transport queue in SetActiveModules and
+  // `mutex_` in OnEncodedImage, the transport queue in SetSending and
   // the bitrate updates, and the worker in OnTransportOverheadChanged, and
   // they go on to take ordered locks (RTCPSender, the pacer's task queue), so
   // the replay deadlocks unless they get `mutex_` in the recorded order.

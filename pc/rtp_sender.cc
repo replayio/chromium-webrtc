@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -22,6 +23,7 @@
 #include "api/media_stream_interface.h"
 #include "api/priority.h"
 #include "api/rtc_error.h"
+#include "base/record_replay.h"
 #include "media/base/media_engine.h"
 #include "pc/legacy_stats_collector_interface.h"
 #include "rtc_base/checks.h"
@@ -597,9 +599,18 @@ void RtpSenderBase::SetFrameTransformer(
   }
 }
 
-LocalAudioSinkAdapter::LocalAudioSinkAdapter() : sink_(nullptr) {}
+LocalAudioSinkAdapter::LocalAudioSinkAdapter() : sink_(nullptr) {
+  if (recordreplay::IsRecordingOrReplaying() &&
+      !recordreplay::AreEventsDisallowed()) {
+    record_replay_sink_ordered_lock_id_ =
+        recordreplay::CreateOrderedLock("LocalAudioSinkAdapter.lock_");
+  }
+}
 
 LocalAudioSinkAdapter::~LocalAudioSinkAdapter() {
+  std::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_sink_ordered_lock_id_)
+    ordered.emplace(record_replay_sink_ordered_lock_id_);
   MutexLock lock(&lock_);
   if (sink_)
     sink_->OnClose();
@@ -614,6 +625,9 @@ void LocalAudioSinkAdapter::OnData(
     std::optional<int64_t> absolute_capture_timestamp_ms) {
   TRACE_EVENT2("webrtc", "LocalAudioSinkAdapter::OnData", "sample_rate",
                sample_rate, "number_of_frames", number_of_frames);
+  std::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_sink_ordered_lock_id_)
+    ordered.emplace(record_replay_sink_ordered_lock_id_);
   MutexLock lock(&lock_);
   if (sink_) {
     sink_->OnData(audio_data, bits_per_sample, sample_rate, number_of_channels,
@@ -623,6 +637,9 @@ void LocalAudioSinkAdapter::OnData(
 }
 
 void LocalAudioSinkAdapter::SetSink(cricket::AudioSource::Sink* sink) {
+  std::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_sink_ordered_lock_id_)
+    ordered.emplace(record_replay_sink_ordered_lock_id_);
   MutexLock lock(&lock_);
   RTC_DCHECK(!sink || !sink_);
   sink_ = sink;
