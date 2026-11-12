@@ -67,6 +67,11 @@ TransportSequenceNumberFeedbackGenenerator::
       previous_abs_send_time_(0),
       abs_send_timestamp_(Timestamp::Zero()),
       last_arrival_time_with_abs_send_time_(Timestamp::MinusInfinity()) {
+  if (recordreplay::IsRecordingOrReplaying() &&
+      !recordreplay::AreEventsDisallowed()) {
+    record_replay_send_interval_recorded_ = true;
+    record_replay_send_interval_us_ = send_interval_.us();
+  }
   RTC_LOG(LS_INFO)
       << "Maximum interval between transport feedback RTCP messages: "
       << kMaxInterval;
@@ -171,7 +176,7 @@ TimeDelta TransportSequenceNumberFeedbackGenenerator::Process(Timestamp now) {
   }
   if (record_replay_send_interval_recorded_) {
     send_interval_ = TimeDelta::Micros(recordreplay::RecordReplayValue(
-        "RemoteEstimatorProxy::send_interval_",
+        "TransportSequenceNumberFeedbackGenenerator::send_interval_",
         record_replay_send_interval_us_.load()));
   }
   Timestamp next_process_time = last_process_time_ + send_interval_;
@@ -204,6 +209,10 @@ void TransportSequenceNumberFeedbackGenenerator::OnSendBandwidthEstimateChanged(
           ? kMaxInterval
           : std::max(kTwccReportSize / twcc_bitrate, kMinInterval);
 
+  if (record_replay_send_interval_recorded_) {
+    record_replay_send_interval_us_.store(send_interval.us());
+    return;
+  }
   MutexLock lock(&lock_);
   send_interval_ = send_interval;
 }
