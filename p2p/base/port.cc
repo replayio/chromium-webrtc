@@ -260,6 +260,7 @@ void Port::AddAddress(const SocketAddress& address,
   c.set_url(url);
   c.set_related_address(related_address);
   c.set_network_slice(network_->network_slice());
+  recordreplay::Assert("Port::AddAddress %d", c.address().IsAnyIP());
 
   bool pending = MaybeObfuscateAddress(c, is_final);
 
@@ -278,6 +279,9 @@ bool Port::MaybeObfuscateAddress(const Candidate& c, bool is_final) {
     return false;
   }
 
+  recordreplay::Assert("Port::MaybeObfuscateAddress #1 %d",
+                       c.address().IsAnyIP());
+
   auto copy = c;
   auto weak_ptr = weak_factory_.GetWeakPtr();
   auto callback = [weak_ptr, copy, is_final](const IPAddress& addr,
@@ -295,6 +299,8 @@ bool Port::MaybeObfuscateAddress(const Candidate& c, bool is_final) {
       RTC_DCHECK_RUN_ON(weak_ptr->thread_);
       weak_ptr->set_mdns_name_registration_status(
           MdnsNameRegistrationStatus::kCompleted);
+      recordreplay::Assert("Port::MaybeObfuscateAddress #2 %d",
+                           copy.address().IsAnyIP());
       weak_ptr->FinishAddingAddress(copy, is_final);
     }
   };
@@ -305,6 +311,7 @@ bool Port::MaybeObfuscateAddress(const Candidate& c, bool is_final) {
 }
 
 void Port::FinishAddingAddress(const Candidate& c, bool is_final) {
+  recordreplay::Assert("Port::FinishAddingAddress %d", c.address().IsAnyIP());
   candidates_.push_back(c);
   NotifyCandidateReady(this, c);
 

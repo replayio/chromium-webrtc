@@ -11,6 +11,7 @@
 #ifndef MODULES_RTP_RTCP_SOURCE_RTCP_SENDER_H_
 #define MODULES_RTP_RTCP_SOURCE_RTCP_SENDER_H_
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -38,6 +39,7 @@
 #include "modules/rtp_rtcp/source/rtcp_packet/report_block.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/tmmb_item.h"
 #include "modules/rtp_rtcp/source/rtcp_receiver.h"
+#include "rtc_base/platform_thread_types.h"
 #include "rtc_base/random.h"
 #include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/thread_annotations.h"
@@ -140,6 +142,26 @@ class RTCPSender final {
   bool TimeToSendRTCPReport(bool send_keyframe_before_rtp = false) const
       RTC_LOCKS_EXCLUDED(mutex_rtcp_sender_);
 
+  // While recording/replaying, holds the ordered lock for the calling thread
+  // until the scope ends or Release() is called. Sending(), SetLastRtpTime()
+  // and TimeToSendRTCPReport() called by that thread meanwhile don't take it
+  // again, so ModuleRtpRtcpImpl2::OnSendingRtpFrame takes it once around its
+  // own Sending() check and once around the pair it runs on the worker,
+  // rather than once per call. Every other RTCPSender method takes the
+  // ordered lock, which isn't reentrant, so that thread calls them only
+  // after Release().
+  class RecordReplayFrameScope {
+   public:
+    explicit RecordReplayFrameScope(const RTCPSender* sender);
+    RecordReplayFrameScope(const RecordReplayFrameScope&) = delete;
+    RecordReplayFrameScope& operator=(const RecordReplayFrameScope&) = delete;
+    ~RecordReplayFrameScope() { Release(); }
+    void Release();
+
+   private:
+    const RTCPSender* sender_;
+  };
+
   int32_t SendRTCP(const FeedbackState& feedback_state,
                    RTCPPacketType packetType,
                    std::span<const uint16_t> nacks = {})
@@ -170,6 +192,11 @@ class RTCPSender final {
  private:
   class RtcpContext;
   class PacketSender;
+
+  // Whether the calling thread takes the ordered lock before
+  // `mutex_rtcp_sender_`: while recording/replaying, unless it holds it
+  // through a RecordReplayFrameScope.
+  bool RecordReplayTakesOrderedLock() const;
 
   uint32_t ComputeSsrc() const RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_rtcp_sender_);
 
@@ -238,6 +265,18 @@ class RTCPSender final {
   absl::AnyInvocable<void(TimeDelta)> schedule_next_rtcp_send_evaluation_;
 
   mutable Mutex mutex_rtcp_sender_;
+  // Taken before `mutex_rtcp_sender_` while recording/replaying. RTCPSender is
+  // reached from the encoder and audio send queues (OnSendingRtpFrame's
+  // Sending() check) as well as from the worker (MaybeSendRtcp and the rest),
+  // and what a caller reads under `mutex_rtcp_sender_` -- whether it is
+  // sending, whether a report is due -- depends on which of them gets it
+  // first. SetNextRtcpSendEvaluationDuration also posts the next evaluation
+  // to the worker (an ordered lock) while it is held, so the replay can
+  // deadlock as well.
+  int record_replay_ordered_lock_id_ = 0;
+  // Thread holding the ordered lock through a RecordReplayFrameScope.
+  mutable std::atomic<PlatformThreadRef>
+      record_replay_frame_scope_thread_{};
   bool sending_ RTC_GUARDED_BY(mutex_rtcp_sender_);
 
   std::optional<Timestamp> next_time_to_send_rtcp_
