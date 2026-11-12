@@ -185,6 +185,11 @@ class RtpVideoSender : public RtpVideoSenderInterface,
   // TODO(bugs.webrtc.org/13517): Remove mutex_ once RtpVideoSender runs on the
   // transport task queue.
   mutable Mutex mutex_;
+  // Taken before `mutex_` while recording/replaying. The encoder queue holds
+  // `mutex_` in OnEncodedImage and the transport queue in SetSending, and they
+  // go on to take ordered locks (RTCPSender, the pacer's task queue), so the
+  // replay deadlocks unless they get `mutex_` in the recorded order.
+  int record_replay_ordered_lock_id_ = 0;
   bool active_ RTC_GUARDED_BY(mutex_) = false;
 
   const std::unique_ptr<FecController> fec_controller_;
