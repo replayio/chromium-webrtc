@@ -11,6 +11,7 @@
 #ifndef MODULES_REMOTE_BITRATE_ESTIMATOR_REMOTE_ESTIMATOR_PROXY_H_
 #define MODULES_REMOTE_BITRATE_ESTIMATOR_REMOTE_ESTIMATOR_PROXY_H_
 
+#include <atomic>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -114,6 +115,14 @@ class RemoteEstimatorProxy {
   const TransportWideFeedbackConfig send_config_;
   Timestamp last_process_time_;
 
+  // While recording/replaying, OnBitrateChanged (transport controller's task
+  // queue) stores the interval here instead of taking `lock_`, and Process
+  // (worker thread) reads it as a recorded value: the delay Process returns
+  // depends on whether it sees the interval from before or after an update.
+  // Every other `lock_` taker in production runs on the worker thread, so
+  // `lock_` itself needs no ordering.
+  bool record_replay_send_interval_recorded_ = false;
+  std::atomic<int64_t> record_replay_send_interval_us_{0};
   Mutex lock_;
   //  `network_state_estimator_` may be null.
   NetworkStateEstimator* const network_state_estimator_

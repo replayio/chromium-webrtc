@@ -159,6 +159,12 @@ class AudioCodingModuleImpl final : public AudioCodingModule {
   int UpdateUponReceivingCodec(int index);
 
   mutable Mutex acm_mutex_;
+  // Taken before `acm_mutex_` while recording/replaying. The encoder queue
+  // holds `acm_mutex_` in Add10MsData while the encoded packets are posted to
+  // the pacer's task queue (the thread pool's ordered locks), and other threads
+  // take it through ModifyEncoder, so the replay deadlocks unless they get it
+  // in the recorded order.
+  int record_replay_ordered_lock_id_ = 0;
   rtc::Buffer encode_buffer_ RTC_GUARDED_BY(acm_mutex_);
   uint32_t expected_codec_ts_ RTC_GUARDED_BY(acm_mutex_);
   uint32_t expected_in_ts_ RTC_GUARDED_BY(acm_mutex_);

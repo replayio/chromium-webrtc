@@ -309,6 +309,7 @@ bool ModuleRtpRtcpImpl2::OnSendingRtpFrame(uint32_t timestamp,
                                            int64_t capture_time_ms,
                                            int payload_type,
                                            bool force_sender_report) {
+  RTCPSender::RecordReplayFrameScope record_replay_scope(&rtcp_sender_);
   if (!Sending())
     return false;
 
@@ -323,8 +324,10 @@ bool ModuleRtpRtcpImpl2::OnSendingRtpFrame(uint32_t timestamp,
     payload_type_optional = payload_type;
   rtcp_sender_.SetLastRtpTime(timestamp, capture_time, payload_type_optional);
   // Make sure an RTCP report isn't queued behind a key frame.
-  if (rtcp_sender_.TimeToSendRTCPReport(force_sender_report))
+  if (rtcp_sender_.TimeToSendRTCPReport(force_sender_report)) {
+    record_replay_scope.Release();
     rtcp_sender_.SendRTCP(GetFeedbackState(), kRtcpReport);
+  }
 
   return true;
 }
