@@ -26,6 +26,8 @@
 #include "rtc_base/net_helper.h"
 #include "rtc_base/socket_address.h"
 
+#include "base/record_replay.h"
+
 using cricket::Candidate;
 using cricket::SessionDescription;
 
@@ -155,9 +157,12 @@ std::unique_ptr<SessionDescriptionInterface> CreateSessionDescription(
   return std::move(jsep_description);
 }
 
-JsepSessionDescription::JsepSessionDescription(SdpType type) : type_(type) {}
+JsepSessionDescription::JsepSessionDescription(SdpType type) : type_(type) {
+  recordreplay::RegisterPointer("JsepSessionDescription", this);
+}
 
 JsepSessionDescription::JsepSessionDescription(const std::string& type) {
+  recordreplay::RegisterPointer("JsepSessionDescription", this);
   absl::optional<SdpType> maybe_type = SdpTypeFromString(type);
   if (maybe_type) {
     type_ = *maybe_type;
@@ -178,16 +183,22 @@ JsepSessionDescription::JsepSessionDescription(
       session_id_(session_id),
       session_version_(session_version),
       type_(type) {
+  recordreplay::RegisterPointer("JsepSessionDescription", this);
+  recordreplay::Assert("JsepSessionDescription %lu", session_id.length());
   RTC_DCHECK(description_);
   candidate_collection_.resize(number_of_mediasections());
 }
 
-JsepSessionDescription::~JsepSessionDescription() {}
+JsepSessionDescription::~JsepSessionDescription() {
+  recordreplay::UnregisterPointer(this);
+}
 
 bool JsepSessionDescription::Initialize(
     std::unique_ptr<cricket::SessionDescription> description,
     const std::string& session_id,
     const std::string& session_version) {
+  recordreplay::Assert("JsepSessionDescription #1 %lu %lu",
+                       recordreplay::PointerId(this), session_id.length());
   if (!description)
     return false;
 
