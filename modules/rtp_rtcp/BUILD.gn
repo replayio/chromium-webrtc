@@ -307,6 +307,7 @@ rtc_library("rtp_rtcp") {
     "../../rtc_base:macromagic",
     "../../rtc_base:mod_ops",
     "../../rtc_base:one_time_event",
+    "../../rtc_base:platform_thread_types",
     "../../rtc_base:race_checker",
     "../../rtc_base:random",
     "../../rtc_base:rate_limiter",
