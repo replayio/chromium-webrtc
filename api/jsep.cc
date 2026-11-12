@@ -249,6 +249,8 @@ size_t SessionDescriptionInterface::number_of_mediasections() const {
 std::unique_ptr<SessionDescriptionInterface>
 SessionDescriptionInterface::Clone() const {
   RTC_DCHECK_RUN_ON(&sequence_checker_);
+  recordreplay::Assert("JsepSessionDescription #2 %lu",
+                       recordreplay::PointerId((void*)this));
   return SessionDescriptionInterface::Create(
       sdp_type_, description() ? description()->Clone() : nullptr, id(),
       version(), CloneCandidateCollection(candidate_collection_));
@@ -321,7 +323,10 @@ const IceCandidateCollection* SessionDescriptionInterface::candidates(
 }
 
 std::string SessionDescriptionInterface::ToString() const {
-  return SdpSerialize(*this);
+  std::string message = SdpSerialize(*this);
+  recordreplay::Assert("JsepSessionDescription::ToString %lu %lu",
+                       recordreplay::PointerId((void*)this), message.length());
+  return message;
 }
 
 bool SessionDescriptionInterface::IsValidMLineIndex(int index) const {
