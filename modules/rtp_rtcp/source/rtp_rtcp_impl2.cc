@@ -303,6 +303,7 @@ bool ModuleRtpRtcpImpl2::OnSendingRtpFrame(uint32_t timestamp,
                                            int64_t capture_time_ms,
                                            int payload_type,
                                            bool force_sender_report) {
+  RTCPSender::RecordReplayFrameScope record_replay_scope(&rtcp_sender_);
   if (!Sending()) {
     return false;
   }
@@ -315,14 +316,21 @@ bool ModuleRtpRtcpImpl2::OnSendingRtpFrame(uint32_t timestamp,
   absl::optional<int> payload_type_optional;
   if (payload_type >= 0)
     payload_type_optional = payload_type;
+  // The closure below may be posted to the worker, and an ordered lock must
+  // not be held across a post.
+  record_replay_scope.Release();
 
   auto closure = [this, timestamp, capture_time, payload_type_optional,
                   force_sender_report] {
     RTC_DCHECK_RUN_ON(worker_queue_);
+    RTCPSender::RecordReplayFrameScope worker_record_replay_scope(
+        &rtcp_sender_);
     rtcp_sender_.SetLastRtpTime(timestamp, capture_time, payload_type_optional);
     // Make sure an RTCP report isn't queued behind a key frame.
-    if (rtcp_sender_.TimeToSendRTCPReport(force_sender_report))
+    if (rtcp_sender_.TimeToSendRTCPReport(force_sender_report)) {
+      worker_record_replay_scope.Release();
       rtcp_sender_.SendRTCP(GetFeedbackState(), kRtcpReport);
+    }
   };
   if (worker_queue_->IsCurrent()) {
     closure();

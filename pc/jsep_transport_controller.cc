@@ -24,6 +24,7 @@
 #include "api/rtp_parameters.h"
 #include "api/sequence_checker.h"
 #include "api/transport/enums.h"
+#include "base/record_replay.h"
 #include "media/sctp/sctp_transport_internal.h"
 #include "p2p/base/dtls_transport.h"
 #include "p2p/base/ice_transport_internal.h"
@@ -1201,6 +1202,8 @@ void JsepTransportController::OnTransportGatheringState_n(
 void JsepTransportController::OnTransportCandidateGathered_n(
     cricket::IceTransportInternal* transport,
     const cricket::Candidate& candidate) {
+  recordreplay::Assert("JsepTransportController::OnTransportCandidateGathered Start");
+
   // We should never signal peer-reflexive candidates.
   if (candidate.is_prflx()) {
     RTC_DCHECK_NOTREACHED();
@@ -1209,6 +1212,8 @@ void JsepTransportController::OnTransportCandidateGathered_n(
 
   signal_ice_candidates_gathered_.Send(
       transport->transport_name(), std::vector<cricket::Candidate>{candidate});
+
+  recordreplay::Assert("JsepTransportController::OnTransportCandidateGathered Done");
 }
 
 void JsepTransportController::OnTransportCandidateError_n(
