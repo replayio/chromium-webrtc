@@ -22,6 +22,20 @@
 #include "rtc_base/logging.h"
 #include "rtc_base/synchronization/mutex.h"
 
+#include "base/record_replay.h"
+
+#ifndef WEBRTC_WIN
+#include <sys/random.h>
+#else
+#include <windows.h>
+// #define needed to link in RtlGenRandom(), a.k.a. SystemFunction036.  See the
+// "Community Additions" comment on MSDN here:
+// http://msdn.microsoft.com/en-us/library/windows/desktop/aa387694.aspx
+#define SystemFunction036 NTAPI SystemFunction036
+#include <NTSecAPI.h>
+#undef SystemFunction036
+#endif
+
 // Protect against max macro inclusion.
 #undef max
 
@@ -36,6 +50,20 @@ class SecureRandomGenerator : public RandomGenerator {
   ~SecureRandomGenerator() override {}
   bool Init(const void* seed, size_t len) override { return true; }
   bool Generate(void* buf, size_t len) override {
+    // Avoid calling RAND_bytes when recording/replaying as it can behave in
+    // non-deterministic ways.
+    if (recordreplay::IsRecordingOrReplaying()) {
+#ifdef WEBRTC_LINUX
+      return getrandom(buf, len, 0) == (ssize_t)len;
+#elif defined(WEBRTC_MAC)
+      arc4random_buf(buf, len);
+      return true;
+#elif defined(WEBRTC_WIN)
+      return ::RtlGenRandom(buf, len);
+#else
+      #error "Unknown platform"
+#endif
+    }
     return (RAND_bytes(reinterpret_cast<unsigned char*>(buf), len) > 0);
   }
 };
