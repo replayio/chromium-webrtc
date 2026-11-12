@@ -211,6 +211,8 @@ bool JsepSessionDescription::Initialize(
 
 std::unique_ptr<SessionDescriptionInterface> JsepSessionDescription::Clone()
     const {
+  recordreplay::Assert("JsepSessionDescription #2 %lu",
+                       recordreplay::PointerId((void*)this));
   auto new_description = std::make_unique<JsepSessionDescription>(type_);
   new_description->session_id_ = session_id_;
   new_description->session_version_ = session_version_;
@@ -300,6 +302,8 @@ bool JsepSessionDescription::ToString(std::string* out) const {
     return false;
   }
   *out = SdpSerialize(*this);
+  recordreplay::Assert("JsepSessionDescription::ToString %lu %lu",
+                       recordreplay::PointerId((void*)this), out->length());
   return !out->empty();
 }
 
