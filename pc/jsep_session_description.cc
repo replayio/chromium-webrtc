@@ -231,6 +231,9 @@ JsepSessionDescription::~JsepSessionDescription() {}
 std::unique_ptr<SessionDescriptionInterface>
 SessionDescriptionInterface::Clone() const {
   RTC_DCHECK_RUN_ON(sequence_checker());
+  recordreplay::Assert("JsepSessionDescription #2 %lu",
+                       recordreplay::PointerId(
+                           (const SessionDescriptionInternal*)this));
   return SessionDescriptionInterface::Create(
       sdp_type(), description() ? description()->Clone() : nullptr, id(),
       version(), CloneCandidateCollection(candidate_collection_));
@@ -307,6 +310,10 @@ bool SessionDescriptionInterface::ToString(std::string* out) const {
     return false;
   }
   *out = SdpSerialize(*this);
+  recordreplay::Assert("JsepSessionDescription::ToString %lu %lu",
+                       recordreplay::PointerId(
+                           (const SessionDescriptionInternal*)this),
+                       out->length());
   return !out->empty();
 }
 
