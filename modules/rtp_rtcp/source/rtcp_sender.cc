@@ -23,6 +23,7 @@
 #include "api/units/data_rate.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
+#include "base/record_replay.h"
 #include "logging/rtc_event_log/events/rtc_event_rtcp_packet_outgoing.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/app.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/bye.h"
@@ -171,6 +172,11 @@ RTCPSender::RTCPSender(Configuration config)
       send_video_bitrate_allocation_(false),
       last_payload_type_(-1) {
   RTC_DCHECK(transport_ != nullptr);
+  if (recordreplay::IsRecordingOrReplaying() &&
+      !recordreplay::AreEventsDisallowed()) {
+    record_replay_ordered_lock_id_ =
+        recordreplay::CreateOrderedLock("RTCPSender.mutex_rtcp_sender_");
+  }
 
   builders_[kRtcpSr] = &RTCPSender::BuildSR;
   builders_[kRtcpRr] = &RTCPSender::BuildRR;
@@ -188,12 +194,43 @@ RTCPSender::RTCPSender(Configuration config)
 
 RTCPSender::~RTCPSender() {}
 
+RTCPSender::RecordReplayFrameScope::RecordReplayFrameScope(
+    const RTCPSender* sender)
+    : sender_(sender) {
+  if (!sender_->record_replay_ordered_lock_id_) {
+    sender_ = nullptr;
+    return;
+  }
+  recordreplay::OrderedLock(sender_->record_replay_ordered_lock_id_);
+  sender_->record_replay_frame_scope_thread_.store(rtc::CurrentThreadRef());
+}
+
+void RTCPSender::RecordReplayFrameScope::Release() {
+  if (!sender_)
+    return;
+  sender_->record_replay_frame_scope_thread_.store(rtc::PlatformThreadRef());
+  recordreplay::OrderedUnlock(sender_->record_replay_ordered_lock_id_);
+  sender_ = nullptr;
+}
+
+bool RTCPSender::RecordReplayTakesOrderedLock() const {
+  return record_replay_ordered_lock_id_ &&
+         !rtc::IsThreadRefEqual(record_replay_frame_scope_thread_.load(),
+                                rtc::CurrentThreadRef());
+}
+
 RtcpMode RTCPSender::Status() const {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_rtcp_sender_);
   return method_;
 }
 
 void RTCPSender::SetRTCPStatus(RtcpMode new_method) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_rtcp_sender_);
 
   if (new_method == RtcpMode::kOff) {
@@ -206,6 +243,9 @@ void RTCPSender::SetRTCPStatus(RtcpMode new_method) {
 }
 
 bool RTCPSender::Sending() const {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (RecordReplayTakesOrderedLock())
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_rtcp_sender_);
   return sending_;
 }
@@ -214,6 +254,9 @@ void RTCPSender::SetSendingStatus(const FeedbackState& feedback_state,
                                   bool sending) {
   bool sendRTCPBye = false;
   {
+    absl::optional<recordreplay::AutoOrderedLock> ordered;
+    if (record_replay_ordered_lock_id_)
+      ordered.emplace(record_replay_ordered_lock_id_);
     MutexLock lock(&mutex_rtcp_sender_);
 
     if (method_ != RtcpMode::kOff) {
@@ -232,6 +275,9 @@ void RTCPSender::SetSendingStatus(const FeedbackState& feedback_state,
 }
 
 void RTCPSender::SetNonSenderRttMeasurement(bool enabled) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_rtcp_sender_);
   xr_send_receiver_reference_time_enabled_ = enabled;
 }
@@ -251,6 +297,9 @@ int32_t RTCPSender::SendLossNotification(const FeedbackState& feedback_state,
   };
   absl::optional<PacketSender> sender;
   {
+    absl::optional<recordreplay::AutoOrderedLock> ordered;
+    if (record_replay_ordered_lock_id_)
+      ordered.emplace(record_replay_ordered_lock_id_);
     MutexLock lock(&mutex_rtcp_sender_);
 
     if (!loss_notification_.Set(last_decoded_seq_num, last_received_seq_num,
@@ -281,6 +330,9 @@ int32_t RTCPSender::SendLossNotification(const FeedbackState& feedback_state,
 
 void RTCPSender::SetRemb(int64_t bitrate_bps, std::vector<uint32_t> ssrcs) {
   RTC_CHECK_GE(bitrate_bps, 0);
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_rtcp_sender_);
   if (method_ == RtcpMode::kOff) {
     RTC_LOG(LS_WARNING) << "Can't send RTCP if it is disabled.";
@@ -296,22 +348,34 @@ void RTCPSender::SetRemb(int64_t bitrate_bps, std::vector<uint32_t> ssrcs) {
 }
 
 void RTCPSender::UnsetRemb() {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_rtcp_sender_);
   // Stop sending REMB each report until it is reenabled and REMB data set.
   ConsumeFlag(kRtcpRemb, /*forced=*/true);
 }
 
 bool RTCPSender::TMMBR() const {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_rtcp_sender_);
   return IsFlagPresent(RTCPPacketType::kRtcpTmmbr);
 }
 
 void RTCPSender::SetMaxRtpPacketSize(size_t max_packet_size) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_rtcp_sender_);
   max_packet_size_ = max_packet_size;
 }
 
 void RTCPSender::SetTimestampOffset(uint32_t timestamp_offset) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_rtcp_sender_);
   timestamp_offset_ = timestamp_offset;
 }
@@ -319,6 +383,9 @@ void RTCPSender::SetTimestampOffset(uint32_t timestamp_offset) {
 void RTCPSender::SetLastRtpTime(uint32_t rtp_timestamp,
                                 absl::optional<Timestamp> capture_time,
                                 absl::optional<int8_t> payload_type) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (RecordReplayTakesOrderedLock())
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_rtcp_sender_);
   // For compatibility with clients who don't set payload type correctly on all
   // calls.
@@ -335,27 +402,42 @@ void RTCPSender::SetLastRtpTime(uint32_t rtp_timestamp,
 }
 
 void RTCPSender::SetRtpClockRate(int8_t payload_type, int rtp_clock_rate_hz) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_rtcp_sender_);
   rtp_clock_rates_khz_[payload_type] = rtp_clock_rate_hz / 1000;
 }
 
 uint32_t RTCPSender::SSRC() const {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_rtcp_sender_);
   return ssrc_;
 }
 
 void RTCPSender::SetSsrc(uint32_t ssrc) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_rtcp_sender_);
   ssrc_ = ssrc;
 }
 
 void RTCPSender::SetRemoteSSRC(uint32_t ssrc) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_rtcp_sender_);
   remote_ssrc_ = ssrc;
 }
 
 int32_t RTCPSender::SetCNAME(absl::string_view c_name) {
   RTC_DCHECK_LT(c_name.size(), RTCP_CNAME_SIZE);
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_rtcp_sender_);
   cname_ = std::string(c_name);
   return 0;
@@ -364,6 +446,9 @@ int32_t RTCPSender::SetCNAME(absl::string_view c_name) {
 bool RTCPSender::TimeToSendRTCPReport(bool send_keyframe_before_rtp) const {
   Timestamp now = clock_->CurrentTime();
 
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (RecordReplayTakesOrderedLock())
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_rtcp_sender_);
   RTC_DCHECK(
       (method_ == RtcpMode::kOff && !next_time_to_send_rtcp_.has_value()) ||
@@ -457,6 +542,9 @@ void RTCPSender::BuildREMB(const RtcpContext& ctx, PacketSender& sender) {
 }
 
 void RTCPSender::SetTargetBitrate(unsigned int target_bitrate) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_rtcp_sender_);
   tmmbr_send_bps_ = target_bitrate;
 }
@@ -611,6 +699,9 @@ int32_t RTCPSender::SendRTCP(const FeedbackState& feedback_state,
   };
   absl::optional<PacketSender> sender;
   {
+    absl::optional<recordreplay::AutoOrderedLock> ordered;
+    if (record_replay_ordered_lock_id_)
+      ordered.emplace(record_replay_ordered_lock_id_);
     MutexLock lock(&mutex_rtcp_sender_);
     sender.emplace(callback, max_packet_size_);
     auto result = ComputeCompoundRTCPPacket(feedback_state, packet_type,
@@ -797,11 +888,17 @@ std::vector<rtcp::ReportBlock> RTCPSender::CreateReportBlocks(
 
 void RTCPSender::SetCsrcs(const std::vector<uint32_t>& csrcs) {
   RTC_DCHECK_LE(csrcs.size(), kRtpCsrcSize);
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_rtcp_sender_);
   csrcs_ = csrcs;
 }
 
 void RTCPSender::SetTmmbn(std::vector<rtcp::TmmbItem> bounding_set) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_rtcp_sender_);
   tmmbn_to_send_ = std::move(bounding_set);
   SetFlag(kRtcpTmmbn, true);
@@ -838,6 +935,9 @@ bool RTCPSender::AllVolatileFlagsConsumed() const {
 
 void RTCPSender::SetVideoBitrateAllocation(
     const VideoBitrateAllocation& bitrate) {
+  absl::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   MutexLock lock(&mutex_rtcp_sender_);
   if (method_ == RtcpMode::kOff) {
     RTC_LOG(LS_WARNING) << "Can't send RTCP if it is disabled.";
@@ -890,6 +990,9 @@ void RTCPSender::SendCombinedRtcpPacket(
   size_t max_packet_size;
   uint32_t ssrc;
   {
+    absl::optional<recordreplay::AutoOrderedLock> ordered;
+    if (record_replay_ordered_lock_id_)
+      ordered.emplace(record_replay_ordered_lock_id_);
     MutexLock lock(&mutex_rtcp_sender_);
     if (method_ == RtcpMode::kOff) {
       RTC_LOG(LS_WARNING) << "Can't send RTCP if it is disabled.";
