@@ -31,6 +31,7 @@
 #include "api/rtp_receiver_interface.h"
 #include "api/rtp_sender_interface.h"
 #include "api/video/builtin_video_bitrate_allocator_factory.h"
+#include "base/record_replay.h"
 #include "media/base/codec.h"
 #include "media/base/rid_description.h"
 #include "p2p/base/ice_transport_internal.h"
@@ -1330,6 +1331,8 @@ SdpOfferAnswerHandler::SdpOfferAnswerHandler(PeerConnectionSdpMethods* pc,
       rtcp_cname_(GenerateRtcpCname()),
       local_ice_credentials_to_replace_(new LocalIceCredentialsToReplace()),
       weak_ptr_factory_(this) {
+  recordreplay::Assert("SdpOfferAnswerHandler %s",
+                       pc->session_id().c_str());
   operations_chain_->SetOnChainEmptyCallback(
       [this_weak_ptr = weak_ptr_factory_.GetWeakPtr()]() {
         if (!this_weak_ptr)
