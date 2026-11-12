@@ -45,6 +45,8 @@
 #include "rtc_base/trace_event.h"
 #include "system_wrappers/include/metrics.h"
 
+#include "base/record_replay.h"
+
 namespace cricket {
 namespace {
 using ::webrtc::IceCandidateType;
@@ -954,9 +956,11 @@ void P2PTransportChannel::OnCandidatesReady(
     PortAllocatorSession* session,
     const std::vector<Candidate>& candidates) {
   RTC_DCHECK_RUN_ON(network_thread_);
+  recordreplay::Assert("P2PTransportChannel::OnCandidatesReady Start %lu", candidates.size());
   for (size_t i = 0; i < candidates.size(); ++i) {
     SignalCandidateGathered(this, candidates[i]);
   }
+  recordreplay::Assert("P2PTransportChannel::OnCandidatesReady Done");
 }
 
 void P2PTransportChannel::OnCandidateError(
