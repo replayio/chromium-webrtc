@@ -55,6 +55,8 @@
 #include "rtc_base/thread.h"
 #include "rtc_base/trace_event.h"
 
+#include "base/record_replay.h"
+
 namespace webrtc {
 namespace {
 
@@ -134,16 +136,22 @@ bool IsAllowedByCandidateFilter(const Candidate& c, uint32_t filter) {
   // returns all 0s, but after sending packets, it'll be the NIC used to
   // send. All 0s is not a valid ICE candidate address and should be filtered
   // out.
+  recordreplay::Assert("IsAllowedByCandidateFilter Start");
   if (c.address().IsAnyIP()) {
+    recordreplay::Assert("IsAllowedByCandidateFilter #1");
     return false;
   }
 
   if (c.is_relay()) {
-    return ((filter & CF_RELAY) != 0);
+    bool rv = ((filter & CF_RELAY) != 0);
+    recordreplay::Assert("IsAllowedByCandidateFilter #2 %d", rv);
+    return rv;
   }
 
   if (c.is_stun()) {
-    return ((filter & CF_REFLEXIVE) != 0);
+    bool rv = ((filter & CF_REFLEXIVE) != 0);
+    recordreplay::Assert("IsAllowedByCandidateFilter #3 %d", rv);
+    return rv;
   }
 
   if (c.is_local()) {
@@ -154,12 +162,16 @@ bool IsAllowedByCandidateFilter(const Candidate& c, uint32_t filter) {
       // candidate (i.e. when the host candidate is a public IP), filtering to
       // only server-reflexive candidates won't work right when the host
       // candidates have public IPs.
+      recordreplay::Assert("IsAllowedByCandidateFilter #4");
       return true;
     }
 
-    return ((filter & CF_HOST) != 0);
+    bool rv = ((filter & CF_HOST) != 0);
+    recordreplay::Assert("IsAllowedByCandidateFilter #5 %d", rv);
+    return rv;
   }
 
+  recordreplay::Assert("IsAllowedByCandidateFilter #6");
   return false;
 }
 
@@ -944,6 +956,8 @@ void BasicPortAllocatorSession::OnAllocationSequenceObjectsCreated() {
 
 void BasicPortAllocatorSession::OnCandidateReady(Port* port,
                                                  const Candidate& c) {
+  recordreplay::Assert("BasicPortAllocatorSession::OnCandidateReady Start");
+
   RTC_DCHECK_RUN_ON(network_thread_);
   PortData* data = FindPort(port);
   RTC_DCHECK(data != nullptr);
@@ -954,6 +968,7 @@ void BasicPortAllocatorSession::OnCandidateReady(Port* port,
   if (!data->inprogress()) {
     RTC_LOG(LS_WARNING)
         << "Discarding candidate because port is already done gathering.";
+    recordreplay::Assert("BasicPortAllocatorSession::OnCandidateReady #1");
     return;
   }
 
@@ -980,12 +995,15 @@ void BasicPortAllocatorSession::OnCandidateReady(Port* port,
 
     // If the current port is not pruned yet, SignalPortReady.
     if (!data->pruned()) {
+      recordreplay::Assert("BasicPortAllocatorSession::OnCandidateReady #2");
       RTC_LOG(LS_INFO) << port->ToString() << ": Port ready.";
       SignalPortReady(this, port);
       port->KeepAliveUntilPruned();
     }
   }
 
+  recordreplay::Assert("BasicPortAllocatorSession::OnCandidateReady #3 %d %d",
+                       data->ready(), CheckCandidateFilter(c));
   if (data->ready() && CheckCandidateFilter(c)) {
     std::vector<Candidate> candidates;
     candidates.push_back(allocator_->SanitizeCandidate(c));
@@ -996,8 +1014,11 @@ void BasicPortAllocatorSession::OnCandidateReady(Port* port,
 
   // If we have pruned any port, maybe need to signal port allocation done.
   if (pruned) {
+    recordreplay::Assert("BasicPortAllocatorSession::OnCandidateReady #4");
     MaybeSignalCandidatesAllocationDone();
   }
+
+  recordreplay::Assert("BasicPortAllocatorSession::OnCandidateReady Done");
 }
 
 void BasicPortAllocatorSession::OnCandidateError(

@@ -36,6 +36,7 @@
 #include "api/sequence_checker.h"
 #include "api/transport/data_channel_transport_interface.h"
 #include "api/transport/enums.h"
+#include "base/record_replay.h"
 #include "call/payload_type.h"
 #include "call/payload_type_picker.h"
 #include "media/base/codec.h"
@@ -1277,6 +1278,8 @@ void JsepTransportController::OnTransportGatheringState_n(
 void JsepTransportController::OnTransportCandidateGathered_n(
     IceTransportInternal* transport,
     const Candidate& candidate) {
+  recordreplay::Assert("JsepTransportController::OnTransportCandidateGathered Start");
+
   // We should never signal peer-reflexive candidates.
   if (candidate.is_prflx()) {
     RTC_DCHECK_NOTREACHED();
@@ -1285,6 +1288,8 @@ void JsepTransportController::OnTransportCandidateGathered_n(
 
   signal_ice_candidates_gathered_.Send(transport->transport_name(),
                                        std::vector<Candidate>{candidate});
+
+  recordreplay::Assert("JsepTransportController::OnTransportCandidateGathered Done");
 }
 
 void JsepTransportController::OnTransportCandidateError_n(
