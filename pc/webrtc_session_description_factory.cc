@@ -44,6 +44,8 @@
 #include "rtc_base/ssl_stream_adapter.h"
 #include "rtc_base/thread.h"
 
+#include "base/record_replay.h"
+
 namespace webrtc {
 namespace {
 const char kFailedDueToIdentityFailed[] =
@@ -135,6 +137,7 @@ WebRtcSessionDescriptionFactory::WebRtcSessionDescriptionFactory(
       env_(env),
       certificate_request_state_(CERTIFICATE_NOT_NEEDED),
       on_certificate_ready_(on_certificate_ready) {
+  recordreplay::Assert("WebRtcSessionDescriptionFactory %s", session_id.c_str());
   RTC_DCHECK(signaling_thread_);
 
   if (!dtls_enabled) {
@@ -303,6 +306,8 @@ void WebRtcSessionDescriptionFactory::InternalCreateOffer(
   // is created regardless if it's identical to the previous one or not.
   // The `session_version_` is a uint64_t, the wrap around should not happen.
   RTC_DCHECK(session_version_ + 1 > session_version_);
+  recordreplay::Assert("WebRtcSessionDescriptionFactory::InternalCreateOffer %s",
+                       session_id_.c_str());
   auto offer = SessionDescriptionInterface::Create(
       SdpType::kOffer, std::move(desc), session_id_,
       absl::StrCat(session_version_++), {},
