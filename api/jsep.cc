@@ -33,6 +33,8 @@
 #include "rtc_base/net_helpers.h"
 #include "rtc_base/socket_address.h"
 
+#include "base/record_replay.h"
+
 namespace webrtc {
 namespace {
 constexpr char kDummyAddress[] = "0.0.0.0";
@@ -202,7 +204,9 @@ SessionDescriptionInterface::Create(
                                       std::move(candidates), encoding_options));
 }
 
-SessionDescriptionInterface::~SessionDescriptionInterface() = default;
+SessionDescriptionInterface::~SessionDescriptionInterface() {
+  recordreplay::UnregisterPointer(this);
+}
 
 void SessionDescriptionInterface::RelinquishThreadOwnership() {
   // Ideally we should require that the method can only be called from the
@@ -234,6 +238,8 @@ SessionDescriptionInterface::SessionDescriptionInterface(
       description_(std::move(desc)),
       candidate_collection_(std::move(candidates)),
       encoding_options_(encoding_options) {
+  recordreplay::RegisterPointer("JsepSessionDescription", this);
+  recordreplay::Assert("JsepSessionDescription %lu", id.length());
   RTC_DCHECK(description() || type == SdpType::kRollback);
   RTC_DCHECK(candidate_collection_.empty() ||
              candidate_collection_.size() == number_of_mediasections());
