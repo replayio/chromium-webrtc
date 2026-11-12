@@ -38,6 +38,8 @@
 #include "rtc_base/win32.h"
 #endif
 
+#include "base/record_replay.h"
+
 namespace rtc {
 
 SocketAddress::SocketAddress() {
@@ -321,11 +323,16 @@ bool SocketAddressFromSockAddrStorage(const sockaddr_storage& addr,
   }
   if (addr.ss_family == AF_INET) {
     const sockaddr_in* saddr = reinterpret_cast<const sockaddr_in*>(&addr);
+    recordreplay::AssertBytes("SocketAddressFromSockAddrStorage #1",
+                              saddr, sizeof(*saddr));
     *out = SocketAddress(IPAddress(saddr->sin_addr),
                          NetworkToHost16(saddr->sin_port));
     return true;
   } else if (addr.ss_family == AF_INET6) {
     const sockaddr_in6* saddr = reinterpret_cast<const sockaddr_in6*>(&addr);
+    recordreplay::AssertBytes("SocketAddressFromSockAddrStorage #2",
+                              saddr, sizeof(*saddr));
+    IPAddress addr(saddr->sin6_addr);
     *out = SocketAddress(IPAddress(saddr->sin6_addr),
                          NetworkToHost16(saddr->sin6_port));
     out->SetScopeID(saddr->sin6_scope_id);
