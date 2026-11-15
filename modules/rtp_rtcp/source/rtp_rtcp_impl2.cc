@@ -321,10 +321,13 @@ bool ModuleRtpRtcpImpl2::OnSendingRtpFrame(uint32_t timestamp,
   auto closure = [this, timestamp, capture_time, payload_type_optional,
                   force_sender_report] {
     RTC_DCHECK_RUN_ON(worker_queue_);
+    RTCPSender::RecordReplayFrameScope record_replay_scope(&rtcp_sender_);
     rtcp_sender_.SetLastRtpTime(timestamp, capture_time, payload_type_optional);
     // Make sure an RTCP report isn't queued behind a key frame.
-    if (rtcp_sender_.TimeToSendRTCPReport(force_sender_report))
+    if (rtcp_sender_.TimeToSendRTCPReport(force_sender_report)) {
+      record_replay_scope.Release();
       rtcp_sender_.SendRTCP(GetFeedbackState(), kRtcpReport);
+    }
   };
   if (worker_queue_->IsCurrent()) {
     closure();

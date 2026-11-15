@@ -22,6 +22,7 @@
 #include "api/units/data_size.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
+#include "base/record_replay.h"
 #include "modules/remote_bitrate_estimator/packet_arrival_map.h"
 #include "modules/rtp_rtcp/source/rtcp_packet.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/transport_feedback.h"
@@ -49,6 +50,11 @@ TransportSequenceNumberFeedbackGenenerator::
       feedback_packet_count_(0),
       send_interval_(kDefaultInterval),
       send_periodic_feedback_(true) {
+  if (recordreplay::IsRecordingOrReplaying() &&
+      !recordreplay::AreEventsDisallowed()) {
+    record_replay_send_interval_recorded_ = true;
+    record_replay_send_interval_us_ = send_interval_.us();
+  }
   RTC_LOG(LS_INFO)
       << "Maximum interval between transport feedback RTCP messages: "
       << kMaxInterval;
@@ -130,6 +136,11 @@ TimeDelta TransportSequenceNumberFeedbackGenenerator::Process(Timestamp now) {
     // PeriodicFeedback is disabled for the rest of the call.
     return TimeDelta::PlusInfinity();
   }
+  if (record_replay_send_interval_recorded_) {
+    send_interval_ = TimeDelta::Micros(recordreplay::RecordReplayValue(
+        "TransportSequenceNumberFeedbackGenenerator::send_interval_",
+        record_replay_send_interval_us_.load()));
+  }
   Timestamp next_process_time = last_process_time_ + send_interval_;
   if (now >= next_process_time) {
     last_process_time_ = now;
@@ -162,6 +173,10 @@ void TransportSequenceNumberFeedbackGenenerator::OnSendBandwidthEstimateChanged(
           ? kMaxInterval
           : std::max(kTwccReportSize / twcc_bitrate, kMinInterval);
 
+  if (record_replay_send_interval_recorded_) {
+    record_replay_send_interval_us_.store(send_interval.us());
+    return;
+  }
   MutexLock lock(&lock_);
   send_interval_ = send_interval;
 }
