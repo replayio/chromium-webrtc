@@ -22,6 +22,7 @@
 #include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
 #include "api/candidate.h"
+#include "base/record_replay.h"
 #include "api/sequence_checker.h"
 #include "api/webrtc_sdp.h"
 #include "p2p/base/p2p_constants.h"
@@ -195,6 +196,8 @@ SessionDescriptionInterface::Create(
     absl::string_view version,
     std::vector<IceCandidateCollection> candidates,
     EncodingOptions encoding_options) {
+  recordreplay::Assert("JsepSessionDescription #1 %lu %lu",
+                       recordreplay::PointerId(description.get()), id.length());
   if (!description && type != SdpType::kRollback)
     return nullptr;
   return absl::WrapUnique(
@@ -238,6 +241,7 @@ SessionDescriptionInterface::SessionDescriptionInterface(
   RTC_DCHECK(candidate_collection_.empty() ||
              candidate_collection_.size() == number_of_mediasections());
   candidate_collection_.resize(number_of_mediasections());
+  recordreplay::Assert("JsepSessionDescription %lu", id_.length());
 }
 
 size_t SessionDescriptionInterface::number_of_mediasections() const {
@@ -247,6 +251,8 @@ size_t SessionDescriptionInterface::number_of_mediasections() const {
 std::unique_ptr<SessionDescriptionInterface>
 SessionDescriptionInterface::Clone() const {
   RTC_DCHECK_RUN_ON(&sequence_checker_);
+  recordreplay::Assert("JsepSessionDescription #2 %lu",
+                       recordreplay::PointerId((void*)this));
   return SessionDescriptionInterface::Create(
       sdp_type_, description() ? description()->Clone() : nullptr, id(),
       version(), CloneCandidateCollection(candidate_collection_),
@@ -320,7 +326,10 @@ const IceCandidateCollection* SessionDescriptionInterface::candidates(
 }
 
 std::string SessionDescriptionInterface::ToString() const {
-  return SdpSerialize(*this);
+  std::string out = SdpSerialize(*this);
+  recordreplay::Assert("JsepSessionDescription::ToString %lu %lu",
+                       recordreplay::PointerId((void*)this), out.length());
+  return out;
 }
 
 bool SessionDescriptionInterface::IsValidMLineIndex(int index) const {

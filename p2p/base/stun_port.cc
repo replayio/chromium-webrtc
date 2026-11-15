@@ -21,6 +21,7 @@
 
 #include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
+#include "base/record_replay.h"
 #include "api/async_dns_resolver.h"
 #include "api/candidate.h"
 #include "api/field_trials_view.h"
@@ -387,6 +388,8 @@ void UDPPort::set_stun_keepalive_delay(const std::optional<TimeDelta>& delay) {
 
 void UDPPort::OnLocalAddressReady(AsyncPacketSocket* /* socket */,
                                   const SocketAddress& address) {
+  recordreplay::Assert("UDPPort::OnLocalAddressReady %d", address.IsAnyIP());
+
   // When adapter enumeration is disabled and binding to the any address, the
   // default local address will be issued as a candidate instead if
   // `emit_local_for_anyaddress` is true. This is to allow connectivity for
@@ -397,6 +400,7 @@ void UDPPort::OnLocalAddressReady(AsyncPacketSocket* /* socket */,
   // least the port is listening.
   MaybeSetDefaultLocalAddress(&addr);
 
+  recordreplay::Assert("UDPPort::OnLocalAddressReady #1 %d", addr.IsAnyIP());
   AddAddress(addr, addr, SocketAddress(), UDP_PROTOCOL_NAME, "", "",
              IceCandidateType::kHost, ICE_TYPE_PREFERENCE_HOST, 0, "", false);
   MaybePrepareStunCandidate();

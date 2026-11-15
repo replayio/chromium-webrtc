@@ -55,6 +55,8 @@
 #include "rtc_base/trace_event.h"
 #include "rtc_base/weak_ptr.h"
 
+#include "base/record_replay.h"
+
 namespace webrtc {
 namespace {
 
@@ -241,6 +243,7 @@ void Port::AddAddress(const SocketAddress& address,
   c.set_underlying_type_for_vpn(network_->underlying_type_for_vpn());
   c.set_url(url);
   c.set_related_address(related_address);
+  recordreplay::Assert("Port::AddAddress %d", c.address().IsAnyIP());
   c.set_network_slice(network_->network_slice());
 
   bool pending = MaybeObfuscateAddress(c, is_final);
@@ -260,6 +263,9 @@ bool Port::MaybeObfuscateAddress(const Candidate& c, bool is_final) {
     return false;
   }
 
+  recordreplay::Assert("Port::MaybeObfuscateAddress #1 %d",
+                       c.address().IsAnyIP());
+
   auto copy = c;
   auto weak_ptr = weak_factory_.GetWeakPtr();
   auto callback = [weak_ptr, copy, is_final](const IPAddress& addr,
@@ -277,6 +283,8 @@ bool Port::MaybeObfuscateAddress(const Candidate& c, bool is_final) {
       RTC_DCHECK_RUN_ON(weak_ptr->thread_);
       weak_ptr->set_mdns_name_registration_status(
           MdnsNameRegistrationStatus::kCompleted);
+      recordreplay::Assert("Port::MaybeObfuscateAddress #2 %d",
+                           copy.address().IsAnyIP());
       weak_ptr->FinishAddingAddress(copy, is_final);
     }
   };
@@ -287,6 +295,7 @@ bool Port::MaybeObfuscateAddress(const Candidate& c, bool is_final) {
 }
 
 void Port::FinishAddingAddress(const Candidate& c, bool is_final) {
+  recordreplay::Assert("Port::FinishAddingAddress %d", c.address().IsAnyIP());
   candidates_.push_back(c);
   NotifyCandidateReady(this, c);
 
@@ -917,7 +926,12 @@ void Port::OnNetworkSliceChanged(const ::webrtc::Network* network) {
 std::string Port::ToString() const {
   RTC_DCHECK_RUN_ON(thread_);
   StringBuilder ss;
-  ss << "Port[" << ToHex(reinterpret_cast<uintptr_t>(this)) << ":"
+  ss << "Port[" << ToHex(
+       recordreplay::RecordReplayValue(
+         "cricket/Port address",
+         reinterpret_cast<uintptr_t>(this)
+       ))
+     << ":"
      << content_name_ << ":" << component_ << ":" << generation_ << ":"
      << IceCandidateTypeToString(type_) << ":" << network_->ToString() << "]";
   return ss.Release();
