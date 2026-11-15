@@ -896,6 +896,7 @@ void BuildIceUfragPwd(const TransportInfo* transport_info,
     InitAttrLine(kAttributeIcePwd, &os);
     os << kSdpDelimiterColon << transport_info->description.ice_pwd;
     AddLine(os.str(), message);
+    recordreplay::Assert("BuildMediaDescription #9 %lu", message->length());
   }
 }
 
@@ -928,6 +929,7 @@ void BuildDtlsFingerprintSetup(const TransportInfo* transport_info,
     InitAttrLine(kAttributeSetup, &os);
     os << kSdpDelimiterColon << dtls_role_str;
     AddLine(os.str(), message);
+    recordreplay::Assert("BuildMediaDescription #12 %lu", message->length());
   }
 }
 
