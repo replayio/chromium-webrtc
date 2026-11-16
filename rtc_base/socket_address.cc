@@ -347,7 +347,6 @@ bool SocketAddressFromSockAddrStorage(const sockaddr_storage& addr,
     const sockaddr_in6* saddr = reinterpret_cast<const sockaddr_in6*>(&addr);
     recordreplay::AssertBytes("SocketAddressFromSockAddrStorage #2",
                               saddr, sizeof(*saddr));
-    IPAddress addr(saddr->sin6_addr);
     *out = SocketAddress(IPAddress(saddr->sin6_addr),
                          NetworkToHost16(saddr->sin6_port));
     out->SetScopeID(saddr->sin6_scope_id);
