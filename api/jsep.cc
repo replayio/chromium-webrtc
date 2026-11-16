@@ -205,7 +205,9 @@ SessionDescriptionInterface::Create(
                                       std::move(candidates), encoding_options));
 }
 
-SessionDescriptionInterface::~SessionDescriptionInterface() = default;
+SessionDescriptionInterface::~SessionDescriptionInterface() {
+  recordreplay::UnregisterPointer(this);
+}
 
 void SessionDescriptionInterface::RelinquishThreadOwnership() {
   // Ideally we should require that the method can only be called from the
@@ -241,6 +243,10 @@ SessionDescriptionInterface::SessionDescriptionInterface(
   RTC_DCHECK(candidate_collection_.empty() ||
              candidate_collection_.size() == number_of_mediasections());
   candidate_collection_.resize(number_of_mediasections());
+  // [RecordReplay] Replay's WebRTC for Chromium 108 does this in
+  // JsepSessionDescription, which is this class now. The ID is what the
+  // asserts in Clone() and ToString() compare.
+  recordreplay::RegisterPointer("JsepSessionDescription", this);
   recordreplay::Assert("JsepSessionDescription %lu", id_.length());
 }
 
