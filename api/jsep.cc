@@ -196,8 +196,6 @@ SessionDescriptionInterface::Create(
     absl::string_view version,
     std::vector<IceCandidateCollection> candidates,
     EncodingOptions encoding_options) {
-  recordreplay::Assert("JsepSessionDescription #1 %lu %lu",
-                       recordreplay::PointerId(description.get()), id.length());
   if (!description && type != SdpType::kRollback)
     return nullptr;
   return absl::WrapUnique(
@@ -246,6 +244,17 @@ SessionDescriptionInterface::SessionDescriptionInterface(
   // [RecordReplay] Replay's WebRTC for Chromium 108 does this in
   // JsepSessionDescription, which is this class now. The ID is what the
   // asserts in Clone() and ToString() compare.
+  //
+  // 108's other assert on a session description, "#1", was in
+  // JsepSessionDescription::Initialize, which filled in a description on an
+  // object an earlier constructor call had registered, so it had a registered
+  // pointer to assert. Upstream
+  // removed that two-step construction: Create() has no object yet, and the
+  // SessionDescription it is handed is not registered, so an assert there
+  // would compare the 0 the driver returns for an unregistered pointer. It is
+  // not registered because that would number it from the same counter as every
+  // other pointer in the recording, and nothing in this class's lifetime is a
+  // place to unregister it.
   recordreplay::RegisterPointer("JsepSessionDescription", this);
   recordreplay::Assert("JsepSessionDescription %lu", id_.length());
 }
