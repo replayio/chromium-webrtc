@@ -196,9 +196,15 @@ SessionDescriptionInterface::Create(
     absl::string_view version,
     std::vector<IceCandidateCollection> candidates,
     EncodingOptions encoding_options) {
-  // [RecordReplay] The length is all 108 asserted here that is still worth
-  // asserting, and this is the only assert on the path that returns no object
-  // at all; the constructor asserts it again for the paths that build one.
+  // [RecordReplay] 108 asserted the pointer ID here too, taken from an object
+  // its two-step construction had already registered. Nothing is registered
+  // this early now, and the SessionDescription handed in is registered
+  // nowhere, so the driver answers 0 for it both while recording and while
+  // replaying. Registering it would draw an ID from the counter every
+  // registered pointer shares and move every ID after it, to assert an
+  // identity nothing else compares. The assert sits ahead of the check below
+  // so that it also covers the path that returns without building an object,
+  // the way 108's did.
   recordreplay::Assert("JsepSessionDescription #1 %lu", id.length());
   if (!description && type != SdpType::kRollback)
     return nullptr;
@@ -248,16 +254,6 @@ SessionDescriptionInterface::SessionDescriptionInterface(
   // [RecordReplay] Replay's WebRTC for Chromium 108 does this in
   // JsepSessionDescription, which is this class now. The ID is what the
   // asserts in Clone() and ToString() compare.
-  //
-  // 108's other assert on a session description, "#1", also asserted the
-  // pointer ID, because Initialize() filled in a description on an object an
-  // earlier constructor call had registered. Upstream removed that two-step
-  // construction, so Create() has no registered object to assert: it holds
-  // only the SessionDescription, which is registered nowhere, and the driver
-  // answers 0 for a pointer it has not seen. Registering it there would
-  // number it from the counter every registered pointer in the recording
-  // shares, moving all the IDs after it, to assert an identity nothing else
-  // compares.
   recordreplay::RegisterPointer("JsepSessionDescription", this);
   recordreplay::Assert("JsepSessionDescription %lu", id_.length());
 }
