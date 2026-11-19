@@ -196,8 +196,16 @@ SessionDescriptionInterface::Create(
     absl::string_view version,
     std::vector<IceCandidateCollection> candidates,
     EncodingOptions encoding_options) {
-  recordreplay::Assert("JsepSessionDescription #1 %lu %lu",
-                       recordreplay::PointerId(description.get()), id.length());
+  // [RecordReplay] 108 asserted the pointer ID here too, taken from an object
+  // its two-step construction had already registered. Nothing is registered
+  // this early now, and the SessionDescription handed in is registered
+  // nowhere, so the driver answers 0 for it both while recording and while
+  // replaying. Registering it would draw an ID from the counter every
+  // registered pointer shares and move every ID after it, to assert an
+  // identity nothing else compares. The assert sits ahead of the check below
+  // so that it also covers the path that returns without building an object,
+  // the way 108's did.
+  recordreplay::Assert("JsepSessionDescription #1 %lu", id.length());
   if (!description && type != SdpType::kRollback)
     return nullptr;
   return absl::WrapUnique(
