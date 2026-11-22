@@ -196,8 +196,7 @@ SessionDescriptionInterface::Create(
     absl::string_view version,
     std::vector<IceCandidateCollection> candidates,
     EncodingOptions encoding_options) {
-  recordreplay::Assert("JsepSessionDescription #1 %lu %lu",
-                       recordreplay::PointerId(description.get()), id.length());
+  recordreplay::Assert("JsepSessionDescription #1 %lu", id.length());
   if (!description && type != SdpType::kRollback)
     return nullptr;
   return absl::WrapUnique(
