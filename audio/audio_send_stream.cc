@@ -475,9 +475,9 @@ webrtc::AudioSendStream::Stats AudioSendStream::GetStats(
     stats.total_input_energy = audio_level_.TotalEnergy();
     stats.total_input_duration = audio_level_.TotalDuration();
   }
-  // The audio thread updates the level for each captured frame while this
-  // runs on another thread, so while recording/replaying the replay reports
-  // the values the recording read.
+  // The audio thread adds each captured frame's level under an unordered lock,
+  // so a replay can see a different number of frames than the recording did.
+  // Report the values the recording read instead.
   if (recordreplay::IsRecordingOrReplaying() &&
       !recordreplay::AreEventsDisallowed()) {
     struct {
