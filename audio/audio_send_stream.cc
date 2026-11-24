@@ -43,6 +43,7 @@
 #include "api/units/time_delta.h"
 #include "audio/audio_state.h"
 #include "audio/channel_send.h"
+#include "base/record_replay.h"
 #include "call/audio_state.h"
 #include "call/bitrate_allocator.h"
 #include "call/rtp_transport_controller_send_interface.h"
@@ -475,6 +476,23 @@ webrtc::AudioSendStream::Stats AudioSendStream::GetStats(
     stats.audio_level = audio_level_.LevelFullRange();
     stats.total_input_energy = audio_level_.TotalEnergy();
     stats.total_input_duration = audio_level_.TotalDuration();
+  }
+  // The audio thread adds each captured frame's level under an unordered lock,
+  // so a replay can see a different number of frames than the recording did.
+  // Report the values the recording read instead.
+  if (recordreplay::IsRecordingOrReplaying() &&
+      !recordreplay::AreEventsDisallowed()) {
+    struct {
+      int16_t audio_level;
+      double total_input_energy;
+      double total_input_duration;
+    } levels = {stats.audio_level, stats.total_input_energy,
+                stats.total_input_duration};
+    recordreplay::RecordReplayBytes("AudioSendStream::GetStats levels",
+                                    &levels, sizeof(levels));
+    stats.audio_level = levels.audio_level;
+    stats.total_input_energy = levels.total_input_energy;
+    stats.total_input_duration = levels.total_input_duration;
   }
 
   stats.ana_statistics = channel_send_->GetANAStatistics();
