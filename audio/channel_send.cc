@@ -49,6 +49,7 @@
 #include "api/units/timestamp.h"
 #include "audio/channel_send_frame_transformer_delegate.h"
 #include "audio/utility/audio_frame_operations.h"
+#include "base/record_replay.h"
 #include "call/rtp_transport_controller_send_interface.h"
 #include "modules/audio_coding/include/audio_coding_module.h"
 #include "modules/audio_coding/include/audio_coding_module_typedefs.h"
@@ -864,13 +865,20 @@ void ChannelSend::ProcessAndEncodeAudio(
   RTC_DCHECK_GT(audio_frame->samples_per_channel_, 0);
   RTC_DCHECK_LE(audio_frame->num_channels_, 8);
 
-  if (!encoder_queue_is_active_.load()) {
+  // StartSend and StopSend set these flags on the worker thread while the
+  // audio thread reads them, so a replay can see them change at a different
+  // frame than the recording did. Use the values the recording read.
+  if (!recordreplay::RecordReplayValueIfAllowed(
+          "ChannelSend::ProcessAndEncodeAudio active",
+          encoder_queue_is_active_.load())) {
     return;
   }
 
   // Update `timestamp_` based on the capture timestamp for the first frame
   // after sending is resumed.
-  if (first_frame_.load()) {
+  if (recordreplay::RecordReplayValueIfAllowed(
+          "ChannelSend::ProcessAndEncodeAudio first frame",
+          first_frame_.load())) {
     first_frame_.store(false);
     if (last_capture_timestamp_ms_ &&
         audio_frame->absolute_capture_timestamp_ms()) {
@@ -896,7 +904,9 @@ void ChannelSend::ProcessAndEncodeAudio(
   encoder_queue_->PostTask(
       [this, post_task_time, audio_frame = std::move(audio_frame)]() mutable {
         RTC_DCHECK_RUN_ON(&encoder_queue_checker_);
-        if (!encoder_queue_is_active_.load()) {
+        if (!recordreplay::RecordReplayValueIfAllowed(
+                "ChannelSend encode task active",
+                encoder_queue_is_active_.load())) {
           return;
         }
         // Measure time between when the audio frame is added to the task queue
