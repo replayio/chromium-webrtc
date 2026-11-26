@@ -302,6 +302,11 @@ class ChannelSend : public ChannelSendInterface,
   std::atomic<bool> include_audio_level_indication_ = false;
   std::atomic<bool> encoder_queue_is_active_ = false;
   std::atomic<bool> first_frame_ = true;
+  // Orders the accesses to the two flags above while recording/replaying.
+  // The worker thread sets them while the audio thread and the encoder queue
+  // read them, and the frame that first sees a change decides what those
+  // threads do next.
+  int record_replay_ordered_lock_id_ = 0;
 
   // E2EE Audio Frame Encryption
   scoped_refptr<FrameEncryptorInterface> frame_encryptor_
@@ -533,6 +538,11 @@ ChannelSend::ChannelSend(
       encoder_queue_checker_(encoder_queue_.get()),
       encoder_format_("x-unknown", 0, 0) {
   audio_coding_ = AudioCodingModule::Create();
+  if (recordreplay::IsRecordingOrReplaying() &&
+      !recordreplay::AreEventsDisallowed()) {
+    record_replay_ordered_lock_id_ = recordreplay::CreateOrderedLock(
+        "ChannelSend.encoder_queue_is_active_");
+  }
 
   RtpRtcpInterface::Configuration configuration;
   configuration.report_block_data_observer = this;
@@ -600,6 +610,9 @@ void ChannelSend::StartSend() {
   RTC_DCHECK_EQ(0, ret);
 
   // It is now OK to start processing on the encoder task queue.
+  std::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   first_frame_.store(true);
   encoder_queue_is_active_.store(true);
 }
@@ -610,7 +623,12 @@ void ChannelSend::StopSend() {
     return;
   }
   sending_ = false;
+  std::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
   encoder_queue_is_active_.store(false);
+  // The encode tasks the flush below waits for take this lock.
+  ordered.reset();
 
   // Wait until all pending encode tasks are executed and clear any remaining
   // buffers in the encoder.
@@ -865,20 +883,16 @@ void ChannelSend::ProcessAndEncodeAudio(
   RTC_DCHECK_GT(audio_frame->samples_per_channel_, 0);
   RTC_DCHECK_LE(audio_frame->num_channels_, 8);
 
-  // StartSend and StopSend set these flags on the worker thread while the
-  // audio thread reads them, so a replay can see them change at a different
-  // frame than the recording did. Use the values the recording read.
-  if (!recordreplay::RecordReplayValueIfAllowed(
-          "ChannelSend::ProcessAndEncodeAudio active",
-          encoder_queue_is_active_.load())) {
+  std::optional<recordreplay::AutoOrderedLock> ordered;
+  if (record_replay_ordered_lock_id_)
+    ordered.emplace(record_replay_ordered_lock_id_);
+  if (!encoder_queue_is_active_.load()) {
     return;
   }
 
   // Update `timestamp_` based on the capture timestamp for the first frame
   // after sending is resumed.
-  if (recordreplay::RecordReplayValueIfAllowed(
-          "ChannelSend::ProcessAndEncodeAudio first frame",
-          first_frame_.load())) {
+  if (first_frame_.load()) {
     first_frame_.store(false);
     if (last_capture_timestamp_ms_ &&
         audio_frame->absolute_capture_timestamp_ms()) {
@@ -893,6 +907,7 @@ void ChannelSend::ProcessAndEncodeAudio(
           diff_frames * audio_frame->samples_per_channel(), 0);
     }
   }
+  ordered.reset();
 
   audio_frame->timestamp_ = timestamp_;
   timestamp_ += audio_frame->samples_per_channel_;
@@ -904,11 +919,13 @@ void ChannelSend::ProcessAndEncodeAudio(
   encoder_queue_->PostTask(
       [this, post_task_time, audio_frame = std::move(audio_frame)]() mutable {
         RTC_DCHECK_RUN_ON(&encoder_queue_checker_);
-        if (!recordreplay::RecordReplayValueIfAllowed(
-                "ChannelSend encode task active",
-                encoder_queue_is_active_.load())) {
+        std::optional<recordreplay::AutoOrderedLock> ordered;
+        if (record_replay_ordered_lock_id_)
+          ordered.emplace(record_replay_ordered_lock_id_);
+        if (!encoder_queue_is_active_.load()) {
           return;
         }
+        ordered.reset();
         // Measure time between when the audio frame is added to the task queue
         // and when the task is actually executed. Goal is to keep track of
         // unwanted extra latency added by the task queue.
